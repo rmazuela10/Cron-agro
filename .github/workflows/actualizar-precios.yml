@@ -9,34 +9,35 @@ name: Actualizar precios de commodities
 # para seguir cayendo a las mismas horas locales. GitHub no hace este ajuste solo.
 on:
   schedule:
-      - cron: "0 11,15,19,23 * * 1-5"  # lun-vie, horario de verano Chile
-  workflow_dispatch: {}  # permite correrlo a mano desde la pestaña Actions, para probar        
+    - cron: "0 11,15,19,23 * * 1-5"  # lun-vie, horario de verano Chile
+  workflow_dispatch: {}  # permite correrlo a mano desde la pestaña Actions, para probar
 
-  permissions:
-    contents: write  # necesario para que el job pueda hacer commit+push del JSON actualizado
+permissions:
+  contents: write  # necesario para que el job pueda hacer commit+push del JSON actualizado
 
-jobs:    
+jobs:
   actualizar:
-    runs-on: ubuntu-latest          
+    runs-on: ubuntu-latest
     steps:
       - name: Clonar el repositorio
         uses: actions/checkout@v4
 
-    - name: Configurar Python
-      uses: actions/setup-python@v5
-      with:
-        python-version: "3.12"
+      - name: Configurar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
 
       - name: Fetch + parseo defensivo + cross-check + fusión
         run: python3 scripts/fetch_and_update.py
-    - name: Commit y push si hubo cambios
-      run: |
-        git config user.name "github-actions[bot]"
-        git config user.email "github-actions[bot]@users.noreply.github.com"
-        git add data/historia/
-        if git diff --cached --quiet; then
-          echo "Sin cambios — no hay nada nuevo que publicar esta corrida."
-      else
-        git commit -m "Actualización automática de precios ($(date -u +%Y-%m-%dT%H:%M:%SZ))"
-        git push
-    fi
+
+      - name: Commit y push si hubo cambios
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/historia/
+          if git diff --cached --quiet; then
+            echo "Sin cambios — no hay nada nuevo que publicar esta corrida."
+          else
+            git commit -m "Actualización automática de precios ($(date -u +%Y-%m-%dT%H:%M:%SZ))"
+            git push
+          fi
