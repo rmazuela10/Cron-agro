@@ -1,5 +1,4 @@
-"""
-fetch_and_update.py — corre dentro de GitHub Actions (con cron). Hace fetch directo
+"""fetch_and_update.py — corre dentro de GitHub Actions (con cron). Hace fetch directo
 al endpoint `chart` de Yahoo Finance (sin navegador: el runner de GitHub tiene salida
 a internet normal, a diferencia del sandbox de Claude donde este pipeline nació), lo
 parsea a la defensiva, cruza el último dato contra meta.regularMarketPrice para
@@ -32,6 +31,14 @@ TICKERS = [
     {"id": "aceite_soya_us", "nombre": "Aceite de Soya", "ticker": "ZL=F", "unidad": "USd/lb", "dec": 2},
     {"id": "azucar_mundial", "nombre": "Azúcar", "ticker": "SB=F", "unidad": "USd/lb", "dec": 2},
     {"id": "petroleo_brent", "nombre": "Petróleo Brent", "ticker": "BZ=F", "unidad": "USD/barril", "dec": 2},
+    # --- Tipo de cambio / índice dólar, agregados 2026-10-02 ---
+    # Mismo endpoint "chart" de Yahoo, mismo parseo defensivo y mismo cross-check: a Yahoo no le
+    # importa si el ticker es un futuro de commodity o un par FX, así que no hizo falta ninguna
+    # rama especial de código, solo sumar estas 4 filas.
+    {"id": "usdclp", "nombre": "Dólar / Peso Chileno", "ticker": "CLP=X", "unidad": "CLP por USD", "dec": 2},
+    {"id": "usdbrl", "nombre": "Dólar / Real Brasileño", "ticker": "BRL=X", "unidad": "BRL por USD", "dec": 4},
+    {"id": "usdpen", "nombre": "Dólar / Sol Peruano", "ticker": "PEN=X", "unidad": "PEN por USD", "dec": 4},
+    {"id": "dxy", "nombre": "Índice Dólar (DXY)", "ticker": "DX-Y.NYB", "unidad": "Índice (puntos)", "dec": 2},
 ]
 
 ENDPOINT_TPL = "https://query1.finance.yahoo.com/v8/finance/chart/{ticker}?range=3mo&interval=1d"
@@ -44,6 +51,27 @@ def fetch_chart(ticker):
     req = urllib.request.Request(url, headers=HEADERS)
     with urllib.request.urlopen(req, timeout=20) as resp:
         return json.load(resp)
+
+
+def sanitize_high_low(puntos):
+    """Encontrado al agregar los tickers de tipo de cambio (2026-10-02): Yahoo Finance devuelve,
+    para varios días dentro del histórico de CLP=X y sobre todo de PEN=X (~7% y ~49% de los días
+    respectivamente, en la carga inicial de 5 años), un "close" que cae FUERA del rango
+    [low, high] de ese mismo día en la misma respuesta (p. ej. close=820.81 con low=838.1 — el
+    cierre quedaría matemáticamente "bajo el mínimo"). No es un hueco ni una anomalía de
+    magnitud (eso ya lo cubre el cross-check de más abajo) — es una inconsistencia interna
+    entre tres campos de la MISMA fuente. No se inventa ningún dato nuevo: "close" es el precio
+    real reportado y se deja intacto; solo se ensancha high/low con el propio close para que la
+    propiedad low <= close <= high se cumpla siempre — si no, el tablero podría mostrar cosas
+    como "Low (día)" mayor que "Last", una contradicción visible en vez de un hueco honesto.
+    Se aplica a TODOS los tickers (no solo FX) como red de seguridad general; los 8 commodities
+    no mostraron el problema en la carga inicial, así que para ellos esto no cambia nada."""
+    for p in puntos:
+        if p["high"] < p["close"]:
+            p["high"] = p["close"]
+        if p["low"] > p["close"]:
+            p["low"] = p["close"]
+    return puntos
 
 
 def parse_fresh(g, payload):
@@ -83,6 +111,8 @@ def parse_fresh(g, payload):
 
     if not puntos:
         return [], f"{g['ticker']}: 0 observaciones válidas tras el parseo"
+
+    puntos = sanitize_high_low(puntos)
 
     # Cross-check anti-anomalía: el close del último bar vs. el precio de mercado
     # reportado independientemente en la misma respuesta. Si difieren demasiado,
@@ -149,9 +179,9 @@ def main():
             json.dump(doc, f, ensure_ascii=False, indent=2)
 
         ultimo = doc["serie"][-1]
-        print(f"  {g['nombre']:16s} n={len(doc['serie']):4d} último={ultimo['fecha']} close={ultimo['close']}")
+        print(f"  {g['nombre']:22s} n={len(doc['serie']):4d} último={ultimo['fecha']} close={ultimo['close']}")
 
-    # Índice liviano — útil para que el dashboard sepa qué hay sin tener que pedir los 8 archivos.
+    # Índice liviano — útil para que el dashboard sepa qué hay sin tener que pedir los 12 archivos.
     index = {"ultima_corrida": ahora, "commodities": [g["id"] for g in TICKERS]}
     with open(HISTORIA_DIR / "index.json", "w", encoding="utf-8") as f:
         json.dump(index, f, ensure_ascii=False, indent=2)
