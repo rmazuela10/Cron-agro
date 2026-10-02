@@ -1,16 +1,27 @@
 name: Actualizar precios de commodities
 
-# IMPORTANTE SOBRE EL HORARIO: GitHub Actions solo acepta cron en UTC (no admite
-# CRON_TZ como la tarea programada original en Claude). Los horarios de abajo
-# (11, 15, 19, 23 UTC) equivalen a 8:00 / 12:00 / 16:00 / 20:00 hora de Chile
-# SOLO mientras Chile está en horario de verano (UTC-3, vigente desde el
-# 6 de septiembre de 2026). Cuando Chile vuelva a horario de invierno (UTC-4,
-# normalmente en abril), hay que restar 1 hora a cada valor (10,14,18,22 UTC)
-# para seguir cayendo a las mismas horas locales. GitHub no hace este ajuste solo.
+# Corre cada 15 minutos, lunes a viernes, las 24 horas. Al no fijar una hora exacta
+# (como antes con 11,15,19,23 UTC) ya no hace falta el ajuste de horario de verano/
+# invierno de Chile — "cada 15 minutos todo el día" significa lo mismo sin importar
+# el huso horario. GitHub Actions no garantiza el minuto exacto bajo carga alta de
+# la plataforma (puede atrasarse unos minutos), pero el mínimo que soporta de forma
+# confiable son 5 minutos; 15 minutos deja margen cómodo. El script no hace ningún
+# commit si no hay datos nuevos que publicar, así que correr seguido no genera ruido
+# en el historial de git ni trabajo extra cuando el mercado está cerrado.
 on:
   schedule:
-    - cron: "0 11,15,19,23 * * 1-5"  # lun-vie, horario de verano Chile
+    - cron: "*/15 * * * 1-5"  # cada 15 min, lun-vie
   workflow_dispatch: {}  # permite correrlo a mano desde la pestaña Actions, para probar
+
+# Con una corrida cada 15 minutos hay más chance de que dos ejecuciones se
+# superpongan (por ejemplo si una corrida manual coincide con la programada, o una
+# corrida queda lenta por Yahoo). Sin esto, dos "git push" casi simultáneos podrían
+# chocar (el segundo quedaría con un checkout desactualizado). "group" hace que una
+# corrida nueva espere a que termine la anterior en vez de correr en paralelo;
+# cancel-in-progress:false asegura que ninguna corrida se cancele a medio camino.
+concurrency:
+  group: actualizar-precios
+  cancel-in-progress: false
 
 permissions:
   contents: write  # necesario para que el job pueda hacer commit+push del JSON actualizado
