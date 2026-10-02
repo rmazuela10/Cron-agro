@@ -60,26 +60,6 @@ Cada commodity es un archivo JSON independiente con esta forma:
 Cada archivo arranca con un histórico base de ~5 años. Desde la primera corrida del
 workflow, cada ejecución fusiona los días nuevos sobre esa base, sin reemplazarla.
 
-## Puesta en marcha
-
-1. **Crea el repositorio en GitHub** (privado o público — para que GitHub Pages
-   sirva los JSON públicamente sin login, el repositorio necesita ser público, o
-   privado con GitHub Pro/Team/Enterprise).
-2. **Sube estos archivos** tal cual están, respetando la estructura de carpetas.
-3. **Habilita permisos de escritura para Actions:**
-   `Settings → Actions → General → Workflow permissions` →
-   **"Read and write permissions"**. Sin esto, el paso de `git push` del workflow
-   falla con un error de permisos.
-4. **Habilita GitHub Pages:**
-   `Settings → Pages → Build and deployment → Source: Deploy from a branch`, rama
-   `main` (o la que corresponda), carpeta `/ (root)`. Esto le da a cada JSON una URL
-   pública fija.
-5. **Prueba el workflow a mano antes de confiar en el cron:** en la pestaña
-   **Actions**, abre "Actualizar precios de commodities" y usa el botón
-   "Run workflow" (disponible gracias a `workflow_dispatch` en el `.yml`). El log
-   debería terminar con un commit nuevo en `data/historia/`, o con un mensaje de
-   "sin cambios" si no hay sesión de mercado nueva.
-
 ## Alcance actual
 
 Este repositorio solo obtiene y publica los datos — no incluye ningún frontend.
