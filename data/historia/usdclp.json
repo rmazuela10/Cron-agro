@@ -7430,7 +7430,7 @@
     {
       "fecha": "2026-07-08",
       "close": 926.49,
-      "high": 938,
+      "high": 938.0,
       "low": 926.19
     },
     {
@@ -7479,7 +7479,7 @@
       "fecha": "2026-07-20",
       "close": 933.98,
       "high": 933.98,
-      "low": 931
+      "low": 931.0
     },
     {
       "fecha": "2026-07-21",
@@ -7591,8 +7591,8 @@
     },
     {
       "fecha": "2026-08-14",
-      "close": 914,
-      "high": 914,
+      "close": 914.0,
+      "high": 914.0,
       "low": 910.79
     },
     {
@@ -7789,7 +7789,7 @@
     },
     {
       "fecha": "2026-09-30",
-      "close": 973,
+      "close": 973.0,
       "high": 973.8,
       "low": 969.04
     },
@@ -7806,7 +7806,7 @@
       "low": 978.7
     }
   ],
-  "ultima_actualizacion": "2026-10-02T17:38:04-03:00",
+  "ultima_actualizacion": "2026-10-02T17:55:03-03:00",
   "exchange": "Interbancario / spot FX",
   "contrato": "Spot (OTC, sin vencimiento)"
 }

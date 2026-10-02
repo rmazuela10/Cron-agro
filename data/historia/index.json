@@ -1,5 +1,5 @@
 {
-  "ultima_corrida": "2026-10-02T16:19:57-03:00",
+  "ultima_corrida": "2026-10-02T17:55:03-03:00",
   "commodities": [
     "maiz_us",
     "trigo_us",
@@ -8,6 +8,10 @@
     "harina_soya_us",
     "aceite_soya_us",
     "azucar_mundial",
-    "petroleo_brent"
+    "petroleo_brent",
+    "usdclp",
+    "usdbrl",
+    "usdpen",
+    "dxy"
   ]
 }
