@@ -1,18 +1,44 @@
-# Dashboard Commodities Agrícolas y Energía — infraestructura de datos en vivo
+# Precios de Commodities Agrícolas y Energía — pipeline automático con GitHub Actions
 
-Este repositorio es el backend real que le falta al `dashboard_granos.html` para
-tener un botón "Actualizar" que funcione fuera de Claude: un cron de GitHub Actions
-que hace fetch a Yahoo Finance de forma automática, y GitHub Pages sirviendo el
-resultado como archivos JSON públicos a los que cualquier navegador puede hacer
-`fetch()` sin problema de CORS.
+Pipeline que descarga precios de futuros agrícolas y energéticos desde Yahoo Finance
+de forma automática varias veces al día, y publica el resultado como archivos JSON
+estáticos vía GitHub Pages — consumibles con `fetch()` desde cualquier navegador, sin
+restricciones de CORS ni autenticación.
 
-## Qué hay acá
+## Qué hace
+
+- `.github/workflows/actualizar-precios.yml` ejecuta el pipeline con un cron de
+  GitHub Actions: lunes a viernes a las 11, 15, 19 y 23 UTC (8:00 / 12:00 / 16:00 /
+  20:00 hora de Chile en horario de verano — ver la nota dentro del archivo sobre el
+  ajuste necesario cuando Chile pasa a horario de invierno, ya que GitHub Actions no
+  ajusta DST automáticamente). También puede dispararse manualmente desde la pestaña
+  **Actions** (`workflow_dispatch`).
+- En cada corrida, `scripts/fetch_and_update.py` hace una petición HTTP directa al
+  endpoint `chart` de Yahoo Finance para cada uno de los 8 tickers configurados
+  (maíz, trigo, soya, avena, harina de soya, aceite de soya, azúcar y petróleo
+  Brent). Parsea la respuesta a la defensiva — un dato faltante nunca se convierte en
+  `0` — y cruza el último valor de la serie contra `meta.regularMarketPrice` de la
+  misma respuesta para descartar anomalías (tolerancia 1%).
+- El resultado se fusiona por fecha sobre `data/historia/<id>.json`: nunca reemplaza
+  la serie completa, solo agrega o actualiza por fecha y recorta el extremo más
+  antiguo de la ventana (~5,2 años) para que el archivo no crezca sin límite.
+- Si hubo cambios, el workflow hace commit y push automático de los JSON
+  actualizados con el token por defecto de GitHub Actions (autor
+  `github-actions[bot]`). Si no hay sesión de mercado nueva que publicar (fin de
+  semana, feriado), no se genera ningún commit.
+- GitHub Pages sirve el contenido del repositorio tal cual, así que cada archivo
+  queda disponible en una URL pública fija, del tipo:
+  `https://<usuario>.github.io/<repo>/data/historia/<id>.json`
+
+## Estructura
 
 ```
 .github/workflows/actualizar-precios.yml   ← el cron: define cuándo corre
 scripts/fetch_and_update.py                 ← fetch + parseo defensivo + cross-check + fusión
 data/historia/*.json                        ← un archivo por commodity (8), con ~5 años de histórico
 ```
+
+## Formato de los datos
 
 Cada commodity es un archivo JSON independiente con esta forma:
 
@@ -31,54 +57,44 @@ Cada commodity es un archivo JSON independiente con esta forma:
 }
 ```
 
-Están sembrados con el histórico de 5 años que ya teníamos (capturado 2026-10-01).
-A partir de que el workflow corra por primera vez, cada ejecución va a fusionar los
-días nuevos sobre esto — nunca reemplaza la serie completa, solo agrega/actualiza
-por fecha y recorta el extremo más viejo que ~5.2 años para que no crezca sin límite.
+Cada archivo arranca con un histórico base de ~5 años. Desde la primera corrida del
+workflow, cada ejecución fusiona los días nuevos sobre esa base, sin reemplazarla.
 
-## Puesta en marcha (una vez)
+## Puesta en marcha
 
-1. **Crea el repositorio en GitHub** (puede ser privado o público — para que GitHub
-   Pages sirva los JSON públicamente sin login, necesita ser público, o privado con
-   GitHub Pro/Team/Enterprise).
+1. **Crea el repositorio en GitHub** (privado o público — para que GitHub Pages
+   sirva los JSON públicamente sin login, el repositorio necesita ser público, o
+   privado con GitHub Pro/Team/Enterprise).
 2. **Sube estos archivos** tal cual están, respetando la estructura de carpetas.
-3. **Habilita permisos de escritura para Actions:** en el repo, ve a
-   `Settings → Actions → General → Workflow permissions` y marca
+3. **Habilita permisos de escritura para Actions:**
+   `Settings → Actions → General → Workflow permissions` →
    **"Read and write permissions"**. Sin esto, el paso de `git push` del workflow
-   va a fallar con un error de permisos — es el error más común al configurar esto.
-4. **Habilita GitHub Pages:** `Settings → Pages → Build and deployment → Source:
-   Deploy from a branch`, rama `main` (o la que uses), carpeta `/ (root)`. Esto le da
-   a `data/historia/maiz_us.json` una URL pública fija, del tipo:
-   `https://<tu-usuario>.github.io/<nombre-del-repo>/data/historia/maiz_us.json`
-5. **Pruébalo a mano antes de confiar en el cron:** en la pestaña **Actions** del
-   repo, entra al workflow "Actualizar precios de commodities" y usa el botón
-   "Run workflow" (existe gracias a `workflow_dispatch` en el `.yml`). Revisa el log
-   — debería terminar con un commit nuevo en `data/historia/` (o decir "sin cambios"
-   si no hay sesión de mercado nueva).
+   falla con un error de permisos.
+4. **Habilita GitHub Pages:**
+   `Settings → Pages → Build and deployment → Source: Deploy from a branch`, rama
+   `main` (o la que corresponda), carpeta `/ (root)`. Esto le da a cada JSON una URL
+   pública fija.
+5. **Prueba el workflow a mano antes de confiar en el cron:** en la pestaña
+   **Actions**, abre "Actualizar precios de commodities" y usa el botón
+   "Run workflow" (disponible gracias a `workflow_dispatch` en el `.yml`). El log
+   debería terminar con un commit nuevo en `data/historia/`, o con un mensaje de
+   "sin cambios" si no hay sesión de mercado nueva.
 
-Desde ahí, el cron corre solo: lunes a viernes, a las 8:00/12:00/16:00/20:00 hora de
-Chile (ver la nota dentro del `.yml` sobre el ajuste de horario de invierno — GitHub
-Actions no ajusta DST automáticamente, hay que editar el archivo a mano en abril).
+## Alcance actual
 
-## Qué NO incluye todavía este repositorio
+Este repositorio solo obtiene y publica los datos — no incluye ningún frontend.
+Consumir estos JSON desde una interfaz (por ejemplo, un `fetch()` a las URLs de
+GitHub Pages) es responsabilidad de quien los use y no es parte de este pipeline.
 
-El `dashboard_granos.html` que ya tienes **no está conectado a esto todavía** — sigue
-leyendo la base estática embebida (y, dentro del Artifact de Claude, la colección
-`historia` de ahí, que es un sistema aparte). Conectar el botón "Actualizar" del
-`.html` a estos JSON (haciendo `fetch()` a la URL de GitHub Pages en vez de depender
-de `window.claude`) es un cambio de código deliberado, pendiente, para cuando quieras
-dar ese paso — no se tocó en esta entrega para no mezclar "preparar la infraestructura"
-con "cambiar el dashboard que ya funciona".
+## Fuente de datos y licencia
 
-## Consideración de licencia (ya discutida antes, vale repetirla acá)
-
-Los datos vienen de Yahoo Finance (futuros CBOT/ICE), documentados hasta ahora como
-"uso interno, no redistribuir" porque la captura era manual y puntual. Automatizar
-esto en un repositorio público, con un cron corriendo solo varias veces al día y
-sirviendo los datos a cualquiera que tenga la URL, se parece bastante más a
-"redistribución en vivo" que a una captura puntual para uso propio. Si el repo va a
-ser público, vale la pena revisar esto — por ejemplo, dejando el repo **privado**
-(con un plan de GitHub que permita Pages privado) en vez de público, o evaluando las
-fuentes 100% libres documentadas en `free-data-sources.md` (USDA AMS para
-granos/oleaginosas, EIA para energía) como reemplazo de Yahoo si el uso va a ser más
-amplio que el tuyo propio.
+Los datos provienen del endpoint no oficial `chart` de Yahoo Finance (futuros
+CBOT/ICE/NYMEX), que no ofrece una licencia explícita para redistribución
+automatizada y pública. Publicar estos datos en un repositorio público,
+actualizados varias veces al día y servidos a cualquiera que tenga la URL,
+constituye una forma de redistribución en vivo, no solo una captura puntual para
+uso propio. Quien despliegue este pipeline debería evaluar alguna de estas dos
+alternativas si el uso va a ir más allá de lo personal: mantener el repositorio
+**privado** (requiere un plan de GitHub que permita Pages privado), o sustituir
+Yahoo Finance por fuentes públicas sin restricciones de licencia — por ejemplo
+USDA AMS para precios físicos de granos y oleaginosas, o EIA para energía.
