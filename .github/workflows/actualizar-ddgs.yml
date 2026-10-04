@@ -13,7 +13,7 @@ on:
   workflow_dispatch:
     inputs:
       historico:
-        description: "Recargar todo el histórico desde el archivo de USDA (desde jul-2022)"
+        description: "Reconstruir todo el histórico desde los archivos de USDA (desde jul-2022)"
         type: boolean
         default: false
 
@@ -40,7 +40,12 @@ jobs:
         run: sudo apt-get install -y poppler-utils
 
       - name: Bajar el reporte de USDA, leerlo y fusionar
-        run: python3 scripts/fetch_ddgs.py ${{ inputs.historico && '--historico' || '' }}
+        run: |
+          if [ "${{ inputs.historico }}" = "true" ]; then
+            python3 scripts/historico_ddgs.py
+          else
+            python3 scripts/fetch_ddgs.py
+          fi
 
       - name: Commit y push si hubo cambios
         run: |

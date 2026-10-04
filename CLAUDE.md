@@ -29,7 +29,7 @@ Variables actuales (id → ticker Yahoo): maiz_us ZC=F, trigo_us ZW=F, soya_us Z
 
 * `id` es EXACTAMENTE el nombre del archivo y lo que usa el dashboard para armar la URL.
 * La serie va ordenada por `fecha` ascendente, sin fechas duplicadas, recortada a ~1900 días (`TRIM_DAYS`).
-* Cada punto es `{fecha, close, high, low}`. Para series con rango (p. ej. precios AMS min–max): `close` = promedio, `high` = máximo, `low` = mínimo.
+* Cada punto es `{fecha, close, high, low}` (excepción: `ddgs_fob_gulf` guarda solo `{fecha, close}`). Para series con rango (p. ej. precios AMS min–max): `close` = promedio, `high` = máximo, `low` = mínimo.
 
 ## Reglas de integridad de datos (no negociables)
 
@@ -66,7 +66,7 @@ El usuario pidió construir el histórico desde 2017 y la actualización semanal
 
 ¿Fuente numérica = USDA AMS (primaria, texto extraíble; el link de USGC queda solo como referencia) o USGC (spread + maíz de Yahoo, que sería un número DERIVADO y habría que etiquetarlo así)? Mi recomendación: USDA para el dato, y evaluar MARS API / archivo histórico de USDA para el histórico desde 2017. Solo precio, sin copiar el texto de análisis de USGC (tiene copyright; el número es un hecho, el texto no). Granularidad elegida: solo FOB Vessel Gulf (New Orleans).
 
-Cómo mapear a la serie: `close` = promedio, `high` = máximo del rango, `low` = mínimo; `fecha` = fin de semana del reporte. Marcar en metadata cadencia "Semanal". Conservar rango y promedio (nunca solo el punto medio).
+Cómo mapear a la serie: `close` = promedio semanal ("Average" de USDA, nunca el punto medio del rango); `fecha` = fin de semana del reporte. Marcar en metadata cadencia "Semanal". Decisión de Ramon (2026-10-04): esta serie guarda solo `{fecha, close}`, sin `high` ni `low`; el rango mín-máx se lee solo para validar la fila.
 
 ### Verificación obligatoria antes de dar algo por terminado
 

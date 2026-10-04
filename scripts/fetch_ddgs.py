@@ -7,16 +7,16 @@ Vessel). Ejemplo de fila tal como sale de `pdftotext -layout`:
     New Orleans    Ask    245.00-260.00    DN 5.00    254.50    191.67    FOB - OV    Current
                           (mín-máx)        (cambio)   (promedio)(año atrás)
 
-Mapeo a la serie (contrato del dashboard): close = promedio, high = máximo del rango,
-low = mínimo del rango, fecha = último día de la semana del reporte ("Report for
-9/28/2026 - 10/2/2026" -> 2026-10-02).
+Mapeo a la serie: cada punto es {fecha, close}, con close = promedio semanal ("Average")
+y fecha = último día de la semana del reporte ("Report for 9/28/2026 - 10/2/2026" ->
+2026-10-02). Por decisión de Ramon esta serie guarda solo el cierre, sin high ni low;
+el rango mín-máx se lee igual, pero solo para validar que la fila se leyó bien.
 
-Dos modos:
-  python scripts/fetch_ddgs.py              -> baja el reporte vigente (URL fija que USDA
-                                               sobrescribe cada semana) y lo fusiona.
-  python scripts/fetch_ddgs.py --historico  -> recorre el archivo de MyMarketNews de USDA
-                                               (todos los AMS_3616 desde el primero, del
-                                               22-jul-2022) y los fusiona.
+Uso:
+  python scripts/fetch_ddgs.py      -> baja el reporte vigente (URL fija que USDA
+                                       sobrescribe cada semana) y lo fusiona. Lo corre el cron.
+  python scripts/historico_ddgs.py  -> construye el histórico completo desde los archivos
+                                       de USDA (ver ese script).
 
 El reporte AMS_3616 existe desde julio de 2022. Antes de eso USDA no publicaba un precio
 "FOB Vessel" para el Golfo (el reporte diario antiguo traía "CIF NOLA", que es otra base
@@ -205,6 +205,7 @@ def links_mymarketnews():
             break
         for n, url in nuevos:
             links[n] = url
+        print(f"  MyMarketNews página {page}: {len(links)} reportes hasta ahora", flush=True)
         page += 1
         if page > 200:
             raise RuntimeError("el listado de MyMarketNews no termina; revisar paginación")
@@ -221,7 +222,7 @@ def cargar_doc():
 def merge(serie, nuevos):
     """Fusión por fecha: el último valor gana; nunca se reemplaza la serie completa.
     No se recorta: el histórico semanal es chico (~52 puntos/año)."""
-    by_fecha = {p["fecha"]: p for p in serie}
+    by_fecha = {p["fecha"]: {"fecha": p["fecha"], "close": p["close"]} for p in serie}
     for p in nuevos:
         by_fecha[p["fecha"]] = p
     return sorted(by_fecha.values(), key=lambda p: p["fecha"])
@@ -244,27 +245,11 @@ def chequeo_anio_atras(serie, anio_atras_por_fecha):
     return avisos
 
 
-def main():
-    historico = "--historico" in sys.argv[1:]
-    advertencias, nuevos, anio_atras_por_fecha = [], [], {}
-
-    if historico:
-        # Dos archivos de USDA con los mismos PDFs: ESMIS (estable, pero solo hasta
-        # sep-2025) y MyMarketNews (completo, pero a veces lento). Se usan ambos; la fusión
-        # por fecha elimina los repetidos. Orden: de lo más antiguo a lo más nuevo, y el
-        # reporte vigente al final, para que la última publicación de cada semana gane.
-        urls = []
-        for nombre, listar in (("ESMIS", links_esmis), ("MyMarketNews", links_mymarketnews)):
-            try:
-                encontrados = listar()
-                print(f"{nombre}: {len(encontrados)} reportes AMS_3616")
-                urls += encontrados
-            except (urllib.error.URLError, TimeoutError, RuntimeError) as e:
-                advertencias.append(f"No se pudo listar el archivo {nombre}: {e}")
-        urls.append(URL_VIGENTE)
-    else:
-        urls = [URL_VIGENTE]
-
+def actualizar(urls, advertencias, verbose=False):
+    """Lee cada PDF de `urls` (del más antiguo al más nuevo) y fusiona los precios en
+    data/historia/ddgs_fob_gulf.json. Lo usan este script (reporte vigente) y
+    historico_ddgs.py (archivo completo). Devuelve cuántos reportes se leyeron bien."""
+    nuevos, anio_atras_por_fecha = [], {}
     for url in urls:
         try:
             punto, anio_atras, adv = parse_reporte(pdf_a_texto(descargar(url)))
@@ -274,21 +259,21 @@ def main():
             continue
         if adv:
             advertencias.append(adv)
-        nuevos.append(punto)
+        # Se guarda solo el cierre (el promedio semanal de USDA), como pidió Ramon.
+        # El rango mín-máx se usa arriba para validar la lectura, pero no se guarda.
+        nuevos.append({"fecha": punto["fecha"], "close": punto["close"]})
         if anio_atras is not None:
             anio_atras_por_fecha[punto["fecha"]] = anio_atras
-        if historico:
-            print(f"  {punto['fecha']}  close={punto['close']:.2f}  [{punto['low']:.2f}-{punto['high']:.2f}]")
+        if verbose:
+            print(f"  {punto['fecha']}  close={punto['close']:.2f}")
 
     doc = cargar_doc()
     serie_antes = doc.get("serie", [])
     serie = merge(serie_antes, nuevos)
-    for k, v in META.items():
-        doc[k] = v
-
     advertencias += chequeo_anio_atras(serie, anio_atras_por_fecha)
 
-    if serie != serie_antes:
+    if serie != serie_antes or any(doc.get(k) != v for k, v in META.items()):
+        doc.update(META)
         doc["serie"] = serie
         doc["ultima_actualizacion"] = dt.datetime.now(ZoneInfo("America/Santiago")).isoformat(timespec="seconds")
         DOC_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -297,15 +282,24 @@ def main():
         u = serie[-1]
         print(f"DDGS FOB Golfo: n={len(serie)} desde {serie[0]['fecha']} último={u['fecha']} close={u['close']}")
     else:
-        print("Sin cambios: el reporte vigente ya estaba en la serie.")
+        print("Sin cambios: el reporte ya estaba en la serie.")
+    return len(nuevos)
 
+
+def terminar(advertencias, leidos):
     if advertencias:
         print("\nAdvertencias de esta corrida:")
         for a in advertencias:
             print(" -", a)
     # Falla en voz alta (job en rojo en Actions) si no se pudo leer nada, para que se note.
-    if not nuevos:
+    if not leidos:
         sys.exit("ERROR: no se pudo leer ningún reporte de DDGS; la serie quedó como estaba.")
+
+
+def main():
+    advertencias = []
+    leidos = actualizar([URL_VIGENTE], advertencias)
+    terminar(advertencias, leidos)
 
 
 if __name__ == "__main__":
