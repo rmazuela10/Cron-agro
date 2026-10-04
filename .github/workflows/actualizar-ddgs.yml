@@ -1,0 +1,61 @@
+name: Actualizar DDGS (USDA AMS)
+
+# Precio semanal de DDGS FOB Vessel Gulf (New Orleans) desde el USDA AMS National
+# Weekly Ethanol Report (AMS_3616). USDA lo publica una vez por semana (normalmente el
+# viernes en la tarde, hora de EE.UU.), así que basta con revisar una vez al día: si el
+# reporte no cambió, el script no toca nada y no hay commit.
+#
+# Va separado del workflow de Yahoo a propósito: si USDA cambia el formato del PDF,
+# falla solo este job (en rojo, para que se note) y los precios de Yahoo siguen igual.
+on:
+  schedule:
+    - cron: "0 13 * * *"  # todos los días a las 13:00 UTC
+  workflow_dispatch:
+    inputs:
+      historico:
+        description: "Recargar todo el histórico desde el archivo de USDA (desde jul-2022)"
+        type: boolean
+        default: false
+
+concurrency:
+  group: actualizar-ddgs
+  cancel-in-progress: false
+
+permissions:
+  contents: write  # para hacer commit+push del JSON actualizado
+
+jobs:
+  actualizar:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Clonar el repositorio
+        uses: actions/checkout@v4
+
+      - name: Configurar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Instalar pdftotext
+        run: sudo apt-get install -y poppler-utils
+
+      - name: Bajar el reporte de USDA, leerlo y fusionar
+        run: python3 scripts/fetch_ddgs.py ${{ inputs.historico && '--historico' || '' }}
+
+      - name: Commit y push si hubo cambios
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/historia/ddgs_fob_gulf.json
+          if git diff --cached --quiet; then
+            echo "Sin cambios — no hay reporte nuevo de DDGS."
+            exit 0
+          fi
+          git commit -m "Actualización automática de DDGS ($(date -u +%Y-%m-%dT%H:%M:%SZ))"
+          # El workflow de Yahoo hace push cada 15 min; si llegó antes, se trae su commit
+          # (toca otros archivos, así que no hay conflicto) y se reintenta.
+          for i in 1 2 3; do
+            git pull --rebase && git push && exit 0
+            sleep $((i * 5))
+          done
+          exit 1
