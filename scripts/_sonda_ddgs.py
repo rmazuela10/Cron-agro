@@ -1,55 +1,72 @@
 """Sonda temporal (se borra antes de fusionar): explora fuentes USDA desde el runner."""
-import re, subprocess, urllib.request, json
+import re, subprocess, urllib.request, html as H_
 H = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+B = "https://esmis.nal.usda.gov"
 
 def get(url, binary=False):
     try:
-        r = urllib.request.urlopen(urllib.request.Request(url, headers=H), timeout=40)
+        r = urllib.request.urlopen(urllib.request.Request(url, headers=H), timeout=60)
         b = r.read()
-        print(f"[{r.status}] {url} ({len(b)} bytes, {r.headers.get('Content-Type')})")
         return b if binary else b.decode("utf-8", "replace")
     except Exception as e:
-        print(f"[ERR] {url}: {e}")
-        return None
+        print(f"[ERR] {url}: {e}"); return None
 
 def pdftext(b, name):
     open(f"/tmp/{name}.pdf", "wb").write(b)
     subprocess.run(["pdftotext", "-layout", f"/tmp/{name}.pdf", f"/tmp/{name}.txt"], check=True)
     return open(f"/tmp/{name}.txt").read()
 
-def ddgs_section(t):
-    i = t.find("Distillers Grain Dried")
-    return t[i:i+2500] if i >= 0 else "(NO ENCONTRADO 'Distillers Grain Dried')"
+def grep(t, pats, ctx=0):
+    lines = t.splitlines()
+    for i, l in enumerate(lines):
+        if re.search(pats, l, re.I):
+            for j in range(max(0, i-ctx), min(len(lines), i+ctx+1)):
+                print("   |", lines[j].rstrip()[:200])
 
-print("===== 1. ams_3616.pdf actual =====")
-b = get("https://www.ams.usda.gov/mnreports/ams_3616.pdf", True)
-if b:
-    t = pdftext(b, "actual"); print(t[:600]); print(ddgs_section(t))
+def releases(h):
+    # pares (fecha, link) — imprime el texto plano alrededor de cada link
+    out = []
+    for m in re.finditer(r'href="(/sites/default/release-files/[^"]+)"', h):
+        pre = re.sub(r"<[^>]+>", " ", h[max(0, m.start()-700):m.start()])
+        pre = re.sub(r"\s+", " ", H_.unescape(pre))[-120:]
+        out.append((pre, m.group(1)))
+    return out
 
-print("===== 2. ESMIS listado national-weekly-ethanol-report =====")
-for p in [0, 16, 30, 60]:
-    h = get(f"https://esmis.nal.usda.gov/publication/national-weekly-ethanol-report?page={p}")
-    if h:
-        links = re.findall(r'href="([^"]+release-files[^"]+)"', h)
-        dates = re.findall(r'(\w{3,9} \d{1,2}, \d{4})', h)
-        print("  links:", len(links), links[:2], links[-2:]); print("  fechas:", dates[:3], dates[-3:])
-        last = re.findall(r'page=(\d+)"[^>]*>\s*(?:Last|last|»)', h); print("  last:", last)
+for slug in ["national-weekly-ethanol-report", "national-daily-ethanol-report-pdf"]:
+    print(f"===== {slug} =====")
+    h = get(f"{B}/publication/{slug}?page=0")
+    if not h: continue
+    pages = [int(x) for x in re.findall(r"[?&]page=(\d+)", h)]
+    last = max(pages) if pages else 0
+    print("  ultima pagina:", last)
+    for p in [0, last]:
+        hp = get(f"{B}/publication/{slug}?page={p}")
+        rs = releases(hp or "")
+        print(f"  -- page {p}: {len(rs)} links")
+        for pre, l in rs[:3] + rs[-3:]:
+            print("    ", repr(pre[-90:]), l)
 
-print("===== 3. ESMIS búsqueda SJ_GR113 / DDGS / ethanol =====")
-for q in ["sj_gr113", "distillers grain", "ethanol"]:
-    h = get(f"https://esmis.nal.usda.gov/search?search_api_fulltext={q.replace(' ','+')}")
-    if h:
-        print("  pubs:", sorted(set(re.findall(r'href="(/publication/[^"?#]+)"', h)))[:30])
+print("===== actual: Export Point =====")
+t = pdftext(get("https://www.ams.usda.gov/mnreports/ams_3616.pdf", True), "actual")
+grep(t, r"Export Point|New Orleans|Gulf|NOLA", ctx=2)
 
-print("===== 4. MARS API sin key =====")
-for u in ["https://marsapi.ams.usda.gov/services/v1.2/reports/3616",
-          "https://marsapi.ams.usda.gov/services/v1.2/reports"]:
-    s = get(u); print("  ", (s or "")[:300])
+print("===== weekly más antiguo en ESMIS =====")
+h = get(f"{B}/publication/national-weekly-ethanol-report?page=0")
+last = max(int(x) for x in re.findall(r"[?&]page=(\d+)", h))
+rs = [r for r in releases(get(f"{B}/publication/national-weekly-ethanol-report?page={last}") or "") if "3616" in r[1].upper()]
+for pre, l in rs[-2:]:
+    b = get(B + l, True)
+    if b:
+        t = pdftext(b, "viejo"); print(" archivo:", l); grep(t, r"Report for|Export Point|New Orleans|Gulf|NOLA", ctx=1)
 
-print("===== 5. mymarketnews filerepo =====")
-for u in ["https://mymarketnews.ams.usda.gov/filerepo/reports?field_slug_id_value=3616",
-          "https://mymarketnews.ams.usda.gov/filerepo/reports?field_slug_id_value=2085",
-          "https://mymarketnews.ams.usda.gov/viewReport/3616"]:
-    h = get(u)
-    if h:
-        print("  pdfs:", re.findall(r'href="([^"]+\.(?:pdf|PDF|txt|TXT))"', h)[:10])
+print("===== diarios PDF antiguos (2017-2021): filas NOLA/Gulf =====")
+h = get(f"{B}/publication/national-daily-ethanol-report-pdf?page=0")
+if h:
+    last = max(int(x) for x in re.findall(r"[?&]page=(\d+)", h))
+    for p in sorted(set([last, last*3//4, last//2, last//4])):
+        rs = releases(get(f"{B}/publication/national-daily-ethanol-report-pdf?page={p}") or "")
+        rs = [r for r in rs if r[1].upper().endswith(".PDF")]
+        if not rs: continue
+        b = get(B + rs[0][1], True)
+        if b:
+            t = pdftext(b, f"d{p}"); print(f" page {p}:", rs[0][1]); grep(t, r"Ethanol Report|20\d\d$|NOLA|Gulf|New Orleans|Vessel|Barge", ctx=0)
