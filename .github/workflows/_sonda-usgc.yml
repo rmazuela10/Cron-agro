@@ -1,0 +1,19 @@
+name: Sonda USGC (temporal)
+on:
+  push:
+    branches: [claude/project-thread-rbgqbe]
+    paths: ["_sonda/sonda.py", ".github/workflows/_sonda-usgc.yml"]
+permissions:
+  contents: write
+jobs:
+  sonda:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get install -y poppler-utils >/dev/null 2>&1
+      - run: python3 -u _sonda/sonda.py
+      - run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add _sonda/out && git commit -m "Sonda: imágenes página 2" && git push
