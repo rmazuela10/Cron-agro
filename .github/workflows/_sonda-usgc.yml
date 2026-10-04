@@ -1,21 +1,29 @@
-name: Sonda USGC (temporal) - PDFs para revisar
+name: Sonda USGC (temporal) - reconstruir histórico DDGS
 on:
   push:
     branches: [claude/project-thread-rbgqbe]
-    paths: ["_sonda/sonda.py", ".github/workflows/_sonda-usgc.yml"]
+    paths: [".github/workflows/_sonda-usgc.yml"]
 permissions:
   contents: write
 jobs:
   sonda:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 300
+    env:
+      OMP_THREAD_LIMIT: "1"
     steps:
       - uses: actions/checkout@v4
-      - run: pip install -q pillow numpy && python3 -u _sonda/sonda.py
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq poppler-utils tesseract-ocr
+          pip install -q pillow numpy
+      - run: rm -f data/historia/ddgs_fob_gulf.json && python3 -u scripts/historico_ddgs.py
       - if: success() || failure()
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add _sonda/pdfs2
-          git commit -m "Sonda: PDFs para revisar" || exit 0
+          git add -A data/historia/ddgs_fob_gulf.json
+          git commit -m "Histórico DDGS FOB Golfo desde ene-2021 (USGC, lectura mejorada)" || exit 0
           for i in 1 2 3; do git pull --rebase && git push && exit 0; sleep 5; done
