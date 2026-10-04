@@ -2,7 +2,7 @@ name: Sonda DDGS (temporal)
 on:
   push:
     branches: [claude/project-thread-rbgqbe]
-    paths: ["scripts/_sonda_ddgs.py", ".github/workflows/_sonda-ddgs.yml"]
+    paths: [".github/workflows/_sonda-ddgs.yml"]
 permissions:
   contents: write
 jobs:
@@ -12,10 +12,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: sudo apt-get install -y poppler-utils >/dev/null 2>&1
-      - run: rm -f data/historia/ddgs_fob_gulf.json && python3 -u scripts/historico_ddgs.py
+      - run: python3 -u scripts/historico_ddgs.py
       - run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add data/historia/ddgs_fob_gulf.json
-          git diff --cached --quiet || (git commit -m "Carga del histórico de DDGS FOB Golfo desde USDA AMS (jul-2022 en adelante)" && git push)
-      - run: python3 -u scripts/_sonda_ddgs.py
+          git diff --cached --quiet || (git commit -m "Completar el histórico de DDGS FOB Golfo desde USDA AMS (jul-2022 en adelante)" && git push)
+# intento 2: completar semanas faltantes desde MyMarketNews
