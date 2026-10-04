@@ -57,7 +57,7 @@ Variable semanal en `data/historia/ddgs_fob_gulf.json`, con script y workflow SE
 * Histórico: solo desde enero de 2021 (Ramon pidió no ir más atrás). `scripts/historico_ddgs.py` recorre el listado (solo agrega semanas faltantes; `--rehacer` relee todo). Desde Actions: "Run workflow" con `historico` = true.
 * Esta serie guarda solo `{fecha, close}`, sin `high` ni `low` (decisión de Ramon, 2026-10-04). No copiar el texto de análisis de USGC (copyright): solo el número.
 * El proxy del entorno de Claude bloquea grains.org: para probar contra la fuente hay que correr en GitHub Actions.
-* Cobertura (reconstrucción del 2026-10-04): 264 semanas desde 2021-01-07. Verificadas a mano contra el PDF ~90 semanas, 0 errores. Faltan: 2021-07-22, 2021-12-30, 2022-02-10, 2022-03-03, 2022-03-24, 2022-06-23 (tabla muy chica o borrosa, sin consenso OCR) y 2022-05-26 (el post no trae PDF). USGC no publicó entre 2024-10-03 y 2025-01-09.
+* Cobertura (reconstrucción del 2026-10-04): 264 semanas desde 2021-01-07. Verificadas a mano contra el PDF ~80 semanas, 0 errores. Faltan: 2021-07-22, 2021-12-30, 2022-02-10, 2022-03-03, 2022-03-24, 2022-06-23 (tabla muy chica o borrosa, sin consenso OCR) y 2022-05-26 (el post no trae PDF). USGC no publicó entre 2024-10-03 y 2025-01-09.
 * Fecha: la del título del post, controlada contra la fecha del nombre del PDF (si difieren > 3 días se descarta y se avisa). Correcciones manuales documentadas en `CORRECCIONES_DE_FECHA` de `fetch_ddgs.py` (hoy: el post titulado 29-ene-2024 es el reporte del 29-feb-2024).
 * Alternativa descartada: USDA AMS National Weekly Ethanol Report (`ams_3616.pdf`, fila New Orleans FOB OV, USD/short ton). Sirve como cross-check manual si alguna vez hace falta.
 
