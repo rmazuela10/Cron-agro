@@ -48,17 +48,41 @@ def _tesseract(img, psm, extra=(), tsv=False):
     return out.decode("utf-8", "replace")
 
 
-def _blanco_y_negro(img, umbral=150, borrar_grilla=True):
-    """Blanco y negro; invierte si el fondo es oscuro; opcionalmente borra la grilla
-    (filas/columnas que son negras en más de la mitad de su largo)."""
-    a = np.array(img.convert("L"))
-    if a.mean() < 110:
+def _blanco_y_negro(img, umbral=150, borrar_grilla=True, local=False):
+    """Blanco y negro; las celdas de fondo oscuro (letra blanca) se invierten para que toda
+    la letra quede negra sobre blanco; opcionalmente borra la grilla (filas/columnas que son
+    negras en más de la mitad de su largo)."""
+    a = np.array(img.convert("L")).astype(float)
+    if local:
+        a = np.where(_fondo_local(a) < 110, 255 - a, a)
+    elif a.mean() < 110:
         a = 255 - a
     tinta = a < umbral
     if borrar_grilla:
         tinta[tinta.mean(axis=1) > 0.5, :] = False
         tinta[:, tinta.mean(axis=0) > 0.5] = False
     return Image.fromarray(np.where(tinta, 0, 255).astype("uint8"))
+
+
+def _contraste_por_columna(img, diferencia=70):
+    """Tinta = pixeles que difieren del fondo de su columna (mediana). Sirve en un recorte
+    de una sola fila donde hay celdas oscuras con letra clara y celdas claras con letra
+    oscura."""
+    a = np.array(img.convert("L")).astype(float)
+    tinta = np.abs(a - np.median(a, axis=0)) > diferencia
+    tinta[tinta.mean(axis=1) > 0.5, :] = False  # líneas de la grilla
+    tinta[:, tinta.mean(axis=0) > 0.5] = False
+    return Image.fromarray(np.where(tinta, 0, 255).astype("uint8"))
+
+
+def _fondo_local(a, r=None):
+    """Brillo promedio del entorno de cada pixel (caja de ~2 alturas de letra)."""
+    r = r or max(8, min(a.shape) // 25)
+    c = np.pad(a, r, mode="edge").cumsum(0).cumsum(1)
+    c = np.pad(c, ((1, 0), (1, 0)))
+    n = 2 * r + 1
+    h, w = a.shape
+    return (c[n:n + h, n:n + w] - c[:h, n:n + w] - c[n:n + h, :w] + c[:h, :w]) / (n * n)
 
 
 def _ancho_minimo(img, ancho):
@@ -86,8 +110,9 @@ def _filas_de_tres_numeros(img):
     for toks in filas.values():
         if len(toks) == 3:
             toks.sort()
-            top = min(t[1] for t in toks)
-            bot = max(t[1] + t[3] for t in toks)
+            # Mediana (no mín/máx): a veces tesseract entrega una caja más alta que la fila.
+            top = int(np.median([t[1] for t in toks]))
+            bot = int(np.median([t[1] + t[3] for t in toks]))
             yield top, bot, toks[0][0], toks[-1][0] + toks[-1][2], tuple(t[4] for t in toks)
 
 
@@ -96,17 +121,34 @@ def _metodo_filas(img):
     FOB Vessel con OCR restringido a dígitos."""
     g = _ancho_minimo(img, 2000)
     limpia = _blanco_y_negro(g)
-    lecturas = []
-    for fuente in (limpia, g):
+    lecturas, vistas = [], []
+    for fuente in (limpia, g, _contraste_por_columna(g)):
         for top, bot, x_num, x_fin, valores in _filas_de_tres_numeros(fuente):
             h = bot - top
+            if any(abs(top - t) < h for t in vistas):
+                lecturas.append(valores)  # misma fila ya leída desde la otra fuente
+                continue
             pad = int(h * 0.45)
             caja = (0, max(0, top - pad), max(1, x_num - h), bot + pad)
             etiquetas = (_tesseract(limpia.crop(caja), 7),
                          _tesseract(_blanco_y_negro(g.crop(caja), borrar_grilla=False), 7))
             if not any(ETIQUETA.search(e) for e in etiquetas):
+                # Celda de etiqueta oscura junto a zona clara: contraste contra el fondo de
+                # cada columna.
+                etiquetas = (_tesseract(_contraste_por_columna(g.crop(caja)), 7),)
+            if not any(ETIQUETA.search(e) for e in etiquetas):
                 continue
+            vistas.append(top)
             lecturas.append(valores)
+            # La misma fila recortada de la imagen ORIGINAL y ampliada a distintos tamaños:
+            # es la lectura más fiel en tablas chicas de letra fina (confunde menos 1 y 7).
+            k = img.width / g.width
+            fila = img.convert("L").crop((int((x_num - h) * k), int((top - h * 0.6) * k),
+                                          int((x_fin + h) * k), int((bot + h * 0.6) * k)))
+            for alto in (70, 100, 140):
+                r = fila.resize((max(1, fila.width * alto // max(1, fila.height)), alto), Image.LANCZOS)
+                for um in (120, 150, 180):
+                    lecturas.append(_tokens(_tesseract(_blanco_y_negro(r, um, False), 7, SOLO_NUMEROS)))
             caja = (max(0, x_num - int(h * 0.6)), max(0, top - pad),
                     min(g.width, x_fin + int(h * 0.6)), bot + pad)
             for recorte in (limpia.crop(caja), _blanco_y_negro(g.crop(caja), borrar_grilla=False)):
@@ -120,8 +162,8 @@ def _metodo_texto(img):
     lecturas = []
     for ancho in (2000, 2800):
         g = _ancho_minimo(img, ancho)
-        for umbral in (140, 180):
-            for linea in _tesseract(_blanco_y_negro(g, umbral), 6).splitlines():
+        for bn in (_blanco_y_negro(g, 140), _blanco_y_negro(g, 180), _contraste_por_columna(g)):
+            for linea in _tesseract(bn, 6).splitlines():
                 m = re.search(ETIQUETA.pattern + r"\s*\S*\s+(.*)$", linea, re.I)
                 if m:
                     lecturas.append(_tokens(m.group(1)))
