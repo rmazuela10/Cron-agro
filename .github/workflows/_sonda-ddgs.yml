@@ -1,0 +1,14 @@
+name: Sonda DDGS (temporal)
+on:
+  push:
+    branches: [claude/project-thread-rbgqbe]
+    paths: ["scripts/_sonda_ddgs.py", ".github/workflows/_sonda-ddgs.yml"]
+permissions:
+  contents: read
+jobs:
+  sonda:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get install -y poppler-utils >/dev/null 2>&1 || true
+      - run: python3 scripts/_sonda_ddgs.py
