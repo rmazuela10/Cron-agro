@@ -207,9 +207,40 @@ def merge(serie, nuevos):
     return sorted(by_fecha.values(), key=lambda p: p["fecha"])
 
 
+# Posts cuyo título trae una fecha equivocada, con la fecha correcta y la evidencia.
+CORRECCIONES_DE_FECHA = {
+    # Título "January 29, 2024", pero el PDF se llama 02-29-2024.pdf, la tabla dice
+    # "February 28, 2024" (meses marzo-mayo) y el PDF se creó el 3-mar-2024.
+    "https://grains.org/wp-content/uploads/2024/03/02-29-2024.pdf": dt.date(2024, 2, 29),
+}
+
+
+def fecha_de_archivo(pdf_url):
+    """Fecha en el nombre del PDF ('10-03-2024.pdf', 'DDGS-3.17.22.pdf',
+    '05212026-Weekly...pdf'), o None si el nombre no trae una fecha reconocible."""
+    nombre = pdf_url.rsplit("/", 1)[-1]
+    m = re.search(r"(?<!\d)(\d{1,2})[-.](\d{1,2})[-.](\d{4}|\d{2})(?!\d)", nombre)
+    if not m:
+        m = re.search(r"(?<!\d)(\d{2})(\d{2})(\d{4})(?!\d)", nombre)
+    if not m:
+        return None
+    mes, dia, anio = (int(x) for x in m.groups())
+    try:
+        return dt.date(anio + 2000 if anio < 100 else anio, mes, dia)
+    except ValueError:
+        return None
+
+
 def _leer_un_post(url, desde, ya):
     """Devuelve (fecha, precio, fila) o (fecha, None, None) si se salta; lanza si falla."""
     fecha, pdf_url = leer_post(url)
+    fecha = CORRECCIONES_DE_FECHA.get(pdf_url, fecha)
+    # Control de la fecha: si el nombre del PDF trae otra fecha, no se adivina cuál es la
+    # buena: se descarta y se avisa (se corrige a mano en CORRECCIONES_DE_FECHA).
+    f_archivo = fecha_de_archivo(pdf_url)
+    if f_archivo and abs((f_archivo - fecha).days) > 3:
+        raise FormatoInesperado(f"la fecha del título ({fecha}) no calza con la del PDF "
+                                f"({f_archivo}, {pdf_url})")
     if (desde and fecha < desde) or fecha.isoformat() in ya:
         return fecha, None, None
     precio, fila = leer_tabla(descargar(pdf_url))

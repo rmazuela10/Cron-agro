@@ -1,4 +1,4 @@
-name: Sonda USGC (temporal) - PDFs nuevos para revisar
+name: Sonda USGC (temporal) - probar fetch_ddgs.py (corrida diaria)
 on:
   push:
     branches: [claude/project-thread-rbgqbe]
@@ -11,11 +11,11 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
-      - run: sudo apt-get install -y -qq poppler-utils && pip install -q pillow numpy && python3 -u _sonda/sonda.py
+      - run: sudo apt-get install -y -qq poppler-utils && sudo apt-get install -y -qq tesseract-ocr && pip install -q pillow numpy && python3 -u scripts/fetch_ddgs.py && git status --short
       - if: success() || failure()
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add _sonda/pdfs3
-          git commit -m "Sonda: PDFs de semanas nuevas" || exit 0
+          git add data/historia/ddgs_fob_gulf.json
+          git commit -m "Sonda: corrida diaria de prueba" || exit 0
           for i in 1 2 3; do git pull --rebase && git push && exit 0; sleep 5; done
