@@ -15,8 +15,8 @@ close = ese precio. Por decisión de Ramon la serie guarda solo el cierre, sin h
 
 La tabla es una IMAGEN dentro del PDF (no trae texto), así que se lee con OCR (tesseract):
 ver ocr_tabla.py. Para no aceptar una lectura dudosa, la fila se lee de muchas formas
-independientes y se exige consenso (la misma lectura de los tres valores en al menos 3
-lecturas y en al menos 3/4 de las lecturas válidas). Además cada valor debe estar en un
+independientes y se exige consenso sobre el precio que se guarda (el mismo valor en al
+menos 3 lecturas y en al menos 3/4 de las lecturas válidas). Además cada valor debe estar en un
 rango plausible y los tres meses no pueden diferir más de un 20% entre sí. Si algo no
 calza, ese reporte se descarta y se avisa: nunca se adivina ni se convierte en 0 (ver
 reglas en CLAUDE.md).
@@ -169,10 +169,13 @@ def leer_tabla(pdf_bytes):
     validas = [v for v in validas if _plausible(list(v))]
     if not validas:
         raise FormatoInesperado(f"ninguna lectura OCR válida de la fila: {todas}")
-    ganadora, votos = Counter(validas).most_common(1)[0]
+    # Lo que se guarda es el primer valor (mes más cercano): el consenso se exige sobre él.
+    # Los otros dos solo sirven para descartar lecturas defectuosas (plausibilidad).
+    precio, votos = Counter(v[0] for v in validas).most_common(1)[0]
     if votos < VOTOS_MIN or votos / len(validas) < CONSENSO_MIN:
         raise FormatoInesperado(f"sin consenso entre lecturas OCR: {Counter(validas).most_common(4)}")
-    return ganadora[0], list(ganadora)
+    fila = Counter(v for v in validas if v[0] == precio).most_common(1)[0][0]
+    return precio, list(fila)
 
 
 # --- Serie --------------------------------------------------------------------------------
