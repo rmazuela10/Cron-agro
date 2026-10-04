@@ -14,9 +14,9 @@ low = mínimo del rango, fecha = último día de la semana del reporte ("Report 
 Dos modos:
   python scripts/fetch_ddgs.py              -> baja el reporte vigente (URL fija que USDA
                                                sobrescribe cada semana) y lo fusiona.
-  python scripts/fetch_ddgs.py --historico  -> recorre el archivo ESMIS de USDA (todos los
-                                               AMS_3616 desde el primero, del 22-jul-2022)
-                                               y los fusiona.
+  python scripts/fetch_ddgs.py --historico  -> recorre el archivo de MyMarketNews de USDA
+                                               (todos los AMS_3616 desde el primero, del
+                                               22-jul-2022) y los fusiona.
 
 El reporte AMS_3616 existe desde julio de 2022. Antes de eso USDA no publicaba un precio
 "FOB Vessel" para el Golfo (el reporte diario antiguo traía "CIF NOLA", que es otra base
@@ -46,8 +46,8 @@ ROOT = Path(__file__).parent.parent
 DOC_PATH = ROOT / "data" / "historia" / "ddgs_fob_gulf.json"
 
 URL_VIGENTE = "https://www.ams.usda.gov/mnreports/ams_3616.pdf"
-ESMIS = "https://esmis.nal.usda.gov"
-ESMIS_LISTADO = ESMIS + "/publication/national-weekly-ethanol-report?page={page}"
+MMN = "https://mymarketnews.ams.usda.gov/filerepo/"
+MMN_LISTADO = MMN + "reports?field_slug_id_value=3616&page={page}"
 HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
 
 # Rango de plausibilidad en USD/ton corta. DDGS en el Golfo ha estado entre ~150 y ~350
@@ -103,8 +103,8 @@ def _num(s):
 
 
 def parse_reporte(texto):
-    """Devuelve el punto {fecha, close, high, low} de New Orleans FOB - OV, o lanza
-    FormatoInesperado explicando qué no calzó."""
+    """Devuelve (punto, promedio_año_atrás, advertencia) de la fila New Orleans FOB - OV,
+    o lanza FormatoInesperado explicando qué no calzó. punto = {fecha, close, high, low}."""
     m = re.search(r"Report for\s+(\d{1,2})/(\d{1,2})/(\d{4})\s*-\s*(\d{1,2})/(\d{1,2})/(\d{4})", texto)
     if not m:
         raise FormatoInesperado("no se encontró la línea 'Report for M/D/AAAA - M/D/AAAA'")
@@ -147,6 +147,7 @@ def parse_reporte(texto):
     if not numericos:
         raise FormatoInesperado(f"no se encontró la columna 'Average': {campos}")
     promedio = _num(numericos[0])
+    anio_atras = _num(numericos[1]) if len(numericos) > 1 else None
 
     for v in (low, high, promedio):
         if not (PRECIO_MIN <= v <= PRECIO_MAX):
@@ -161,26 +162,27 @@ def parse_reporte(texto):
         advertencia = f"{fecha}: promedio {promedio} fuera de [{low}, {high}]; se ensancha el rango"
         low, high = min(low, promedio), max(high, promedio)
 
-    return {"fecha": fecha.isoformat(), "close": promedio, "high": high, "low": low}, advertencia
+    punto = {"fecha": fecha.isoformat(), "close": promedio, "high": high, "low": low}
+    return punto, anio_atras, advertencia
 
 
-def links_esmis():
-    """Todos los AMS_3616.PDF del archivo ESMIS (más nuevo primero), sin duplicados."""
-    vistos, links, page = set(), [], 0
+def links_archivo():
+    """Todos los PDF de AMS_3616 del archivo de MyMarketNews, del más antiguo al más nuevo
+    (ordenados por el correlativo del nombre, ams_3616_00211.pdf). Así, si una misma
+    semana se publicó dos veces (una corrección), gana la publicada después."""
+    links, page = {}, 0
     while True:
-        h = descargar(ESMIS_LISTADO.format(page=page)).decode("utf-8", "replace")
-        nuevos = [html.unescape(l) for l in
-                  re.findall(r'href="(/sites/default/release-files/[^"]+AMS_3616\.PDF)"', h, re.I)]
-        nuevos = [l for l in nuevos if l not in vistos]
+        h = descargar(MMN_LISTADO.format(page=page)).decode("utf-8", "replace")
+        encontrados = re.findall(r'href="(?:/filerepo/)?(sites/default/files/3616/[^"]+?ams_3616_(\d+)\.pdf)"', h, re.I)
+        nuevos = [(int(n), MMN + html.unescape(l)) for l, n in encontrados if MMN + html.unescape(l) not in links.values()]
         if not nuevos:
             break
-        for l in nuevos:
-            vistos.add(l)
-            links.append(ESMIS + l)
+        for n, url in nuevos:
+            links[n] = url
         page += 1
-        if page > 500:
-            raise RuntimeError("el listado de ESMIS no termina; revisar paginación")
-    return links
+        if page > 200:
+            raise RuntimeError("el listado de MyMarketNews no termina; revisar paginación")
+    return [links[n] for n in sorted(links)]
 
 
 def cargar_doc():
@@ -199,19 +201,37 @@ def merge(serie, nuevos):
     return sorted(by_fecha.values(), key=lambda p: p["fecha"])
 
 
+def chequeo_anio_atras(serie, anio_atras_por_fecha):
+    """Segunda ruta de verificación: cada reporte trae el promedio de hace un año
+    ("Year Ago"), que USDA publica por separado. Si ya tenemos esa semana en la serie,
+    ambos deben coincidir. Un desacuerdo no dice cuál de los dos está mal (puede ser una
+    corrección posterior de USDA), así que no se borra nada: se avisa para revisarlo."""
+    por_fecha = {dt.date.fromisoformat(p["fecha"]): p for p in serie}
+    avisos = []
+    for f, ya in anio_atras_por_fecha.items():
+        f = dt.date.fromisoformat(f)
+        previo = next((por_fecha[d] for d in (f - dt.timedelta(days=k) for k in (364, 363, 365, 362, 366))
+                       if d in por_fecha), None)
+        if previo and abs(previo["close"] - ya) > 0.01 * ya:
+            avisos.append(f"{f}: 'Year Ago' del reporte = {ya}, pero la serie tiene "
+                          f"{previo['close']} el {previo['fecha']} (revisar)")
+    return avisos
+
+
 def main():
     historico = "--historico" in sys.argv[1:]
-    advertencias, nuevos = [], []
+    advertencias, nuevos, anio_atras_por_fecha = [], [], {}
 
     if historico:
-        urls = links_esmis()
-        print(f"ESMIS: {len(urls)} reportes AMS_3616 encontrados")
+        # El reporte vigente va al final: es la publicación más reciente.
+        urls = links_archivo() + [URL_VIGENTE]
+        print(f"MyMarketNews: {len(urls) - 1} reportes AMS_3616 encontrados (+ el vigente)")
     else:
         urls = [URL_VIGENTE]
 
     for url in urls:
         try:
-            punto, adv = parse_reporte(pdf_a_texto(descargar(url)))
+            punto, anio_atras, adv = parse_reporte(pdf_a_texto(descargar(url)))
         except (FormatoInesperado, urllib.error.URLError, TimeoutError,
                 subprocess.CalledProcessError) as e:
             advertencias.append(f"{url}: {e} — se descarta, no se inventa nada")
@@ -219,19 +239,18 @@ def main():
         if adv:
             advertencias.append(adv)
         nuevos.append(punto)
+        if anio_atras is not None:
+            anio_atras_por_fecha[punto["fecha"]] = anio_atras
         if historico:
             print(f"  {punto['fecha']}  close={punto['close']:.2f}  [{punto['low']:.2f}-{punto['high']:.2f}]")
-
-    # Si el mismo fin de semana aparece en dos archivos (p. ej. una corrección), gana el
-    # publicado más tarde. ESMIS lista del más nuevo al más viejo, así que se invierte.
-    if historico:
-        nuevos.reverse()
 
     doc = cargar_doc()
     serie_antes = doc.get("serie", [])
     serie = merge(serie_antes, nuevos)
     for k, v in META.items():
         doc[k] = v
+
+    advertencias += chequeo_anio_atras(serie, anio_atras_por_fecha)
 
     if serie != serie_antes:
         doc["serie"] = serie

@@ -11,10 +11,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: sudo apt-get install -y poppler-utils >/dev/null 2>&1
-      - run: python3 scripts/fetch_ddgs.py --historico
+      - run: rm -f data/historia/ddgs_fob_gulf.json && python3 scripts/fetch_ddgs.py --historico
       - run: python3 scripts/_sonda_ddgs.py
       - run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add data/historia/ddgs_fob_gulf.json
-          git commit -m "Carga inicial del histórico de DDGS FOB Golfo desde USDA AMS (jul-2022 en adelante)" && git push
+          git diff --cached --quiet || (git commit -m "Carga del histórico de DDGS FOB Golfo desde USDA AMS (jul-2022 en adelante)" && git push)
