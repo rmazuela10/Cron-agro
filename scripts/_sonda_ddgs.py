@@ -1,7 +1,7 @@
 """Sonda temporal: imprime la fila cruda de New Orleans de algunos reportes, para verificar a mano."""
 import sys; sys.path.insert(0, "scripts")
 import fetch_ddgs as f
-urls = f.links_archivo()
+urls = f.links_mymarketnews()
 print("total:", len(urls), urls[0], urls[-1])
 idx = sorted(set([0, len(urls)//3, 2*len(urls)//3, len(urls)-20, len(urls)-8, len(urls)-1]))
 for i in idx:

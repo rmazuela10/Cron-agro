@@ -46,6 +46,8 @@ ROOT = Path(__file__).parent.parent
 DOC_PATH = ROOT / "data" / "historia" / "ddgs_fob_gulf.json"
 
 URL_VIGENTE = "https://www.ams.usda.gov/mnreports/ams_3616.pdf"
+ESMIS = "https://esmis.nal.usda.gov"
+ESMIS_LISTADO = ESMIS + "/publication/national-weekly-ethanol-report?page={page}"
 MMN = "https://mymarketnews.ams.usda.gov/filerepo/"
 MMN_LISTADO = MMN + "reports?field_slug_id_value=3616&page={page}"
 HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
@@ -74,16 +76,20 @@ class FormatoInesperado(Exception):
     """El PDF no tiene la forma esperada. Nunca se adivina: se reporta y se descarta."""
 
 
-def descargar(url, intentos=3):
+def descargar(url, intentos=4):
     ultimo_error = None
     for i in range(intentos):
         try:
             req = urllib.request.Request(url, headers=HEADERS)
-            with urllib.request.urlopen(req, timeout=60) as resp:
+            with urllib.request.urlopen(req, timeout=90) as resp:
                 return resp.read()
+        except urllib.error.HTTPError as e:
+            if e.code < 500:
+                raise  # 404 y similares no se arreglan reintentando
+            ultimo_error = e
         except (urllib.error.URLError, TimeoutError) as e:
             ultimo_error = e
-            time.sleep(2 * (i + 1))
+        time.sleep(5 * (i + 1))
     raise ultimo_error
 
 
@@ -166,7 +172,27 @@ def parse_reporte(texto):
     return punto, anio_atras, advertencia
 
 
-def links_archivo():
+def links_esmis():
+    """PDFs de AMS_3616 en el archivo ESMIS de USDA (biblioteca NAL), del más antiguo al
+    más nuevo. Cubre jul-2022 a sep-2025: ahí dejó de actualizarse."""
+    vistos, links, page = set(), [], 0
+    while True:
+        h = descargar(ESMIS_LISTADO.format(page=page)).decode("utf-8", "replace")
+        nuevos = [ESMIS + html.unescape(l) for l in
+                  re.findall(r'href="(/sites/default/release-files/[^"]+AMS_3616\.PDF)"', h, re.I)]
+        nuevos = [l for l in nuevos if l not in vistos]
+        if not nuevos:
+            break
+        for l in nuevos:
+            vistos.add(l)
+            links.append(l)
+        page += 1
+        if page > 500:
+            raise RuntimeError("el listado de ESMIS no termina; revisar paginación")
+    return links[::-1]
+
+
+def links_mymarketnews():
     """Todos los PDF de AMS_3616 del archivo de MyMarketNews, del más antiguo al más nuevo
     (ordenados por el correlativo del nombre, ams_3616_00211.pdf). Así, si una misma
     semana se publicó dos veces (una corrección), gana la publicada después."""
@@ -223,9 +249,19 @@ def main():
     advertencias, nuevos, anio_atras_por_fecha = [], [], {}
 
     if historico:
-        # El reporte vigente va al final: es la publicación más reciente.
-        urls = links_archivo() + [URL_VIGENTE]
-        print(f"MyMarketNews: {len(urls) - 1} reportes AMS_3616 encontrados (+ el vigente)")
+        # Dos archivos de USDA con los mismos PDFs: ESMIS (estable, pero solo hasta
+        # sep-2025) y MyMarketNews (completo, pero a veces lento). Se usan ambos; la fusión
+        # por fecha elimina los repetidos. Orden: de lo más antiguo a lo más nuevo, y el
+        # reporte vigente al final, para que la última publicación de cada semana gane.
+        urls = []
+        for nombre, listar in (("ESMIS", links_esmis), ("MyMarketNews", links_mymarketnews)):
+            try:
+                encontrados = listar()
+                print(f"{nombre}: {len(encontrados)} reportes AMS_3616")
+                urls += encontrados
+            except (urllib.error.URLError, TimeoutError, RuntimeError) as e:
+                advertencias.append(f"No se pudo listar el archivo {nombre}: {e}")
+        urls.append(URL_VIGENTE)
     else:
         urls = [URL_VIGENTE]
 
