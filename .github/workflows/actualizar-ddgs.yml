@@ -1,11 +1,11 @@
-name: Actualizar DDGS (USDA AMS)
+name: Actualizar DDGS (USGC)
 
-# Precio semanal de DDGS FOB Vessel Gulf (New Orleans) desde el USDA AMS National
-# Weekly Ethanol Report (AMS_3616). USDA lo publica una vez por semana (normalmente el
-# viernes en la tarde, hora de EE.UU.), así que basta con revisar una vez al día: si el
-# reporte no cambió, el script no toca nada y no hay commit.
+# Precio semanal de DDGS FOB Vessel Gulf desde el reporte semanal de DDGS de USGC
+# (https://grains.org/ddgs_report/), tabla de la página 2 del PDF. USGC publica una vez por
+# semana (normalmente el jueves), así que basta con revisar una vez al día: si no hay
+# reporte nuevo, el script no toca nada y no hay commit.
 #
-# Va separado del workflow de Yahoo a propósito: si USDA cambia el formato del PDF,
+# Va separado del workflow de Yahoo a propósito: si USGC cambia el formato del PDF,
 # falla solo este job (en rojo, para que se note) y los precios de Yahoo siguen igual.
 on:
   schedule:
@@ -13,7 +13,7 @@ on:
   workflow_dispatch:
     inputs:
       historico:
-        description: "Reconstruir todo el histórico desde los archivos de USDA (desde jul-2022)"
+        description: "Completar el histórico desde enero de 2021 (solo agrega semanas que falten)"
         type: boolean
         default: false
 
@@ -36,10 +36,10 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Instalar pdftotext
-        run: sudo apt-get install -y poppler-utils
+      - name: Instalar pdftoppm y tesseract (OCR de la tabla del PDF)
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq poppler-utils tesseract-ocr
 
-      - name: Bajar el reporte de USDA, leerlo y fusionar
+      - name: Bajar el reporte de USGC, leer la tabla y fusionar
         run: |
           if [ "${{ inputs.historico }}" = "true" ]; then
             python3 scripts/historico_ddgs.py

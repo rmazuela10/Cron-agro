@@ -1,33 +1,34 @@
-"""fetch_ddgs.py — precio semanal de DDGS FOB Vessel Gulf (New Orleans) desde USDA AMS.
+"""fetch_ddgs.py — precio semanal de DDGS FOB Vessel Gulf desde el reporte semanal de DDGS
+del U.S. Grains & BioProducts Council (USGC): https://grains.org/ddgs_report/
 
-Fuente: USDA AMS "National Weekly Ethanol Report" (AMS_3616), tabla "Distillers Grain
-Dried 10%", subsección "Export Point", fila "New Orleans ... FOB - OV" (OV = Ocean
-Vessel). Ejemplo de fila tal como sale de `pdftotext -layout`:
+Cada semana USGC publica un post con un PDF ("Download report"). En la página 2 del PDF
+viene la "DDGS Price Table" (USD/ton métrica, fuente World Perspectives, Inc.), con una
+fila "FOB Vessel GULF" y tres columnas: el mes más cercano y los dos siguientes. Ejemplo
+(reporte del 6-feb-2025):
 
-    New Orleans    Ask    245.00-260.00    DN 5.00    254.50    191.67    FOB - OV    Current
-                          (mín-máx)        (cambio)   (promedio)(año atrás)
+    Delivery Point            February   March   April
+    FOB Vessel GULF              218       215     212
 
-Mapeo a la serie: cada punto es {fecha, close}, con close = promedio semanal ("Average")
-y fecha = último día de la semana del reporte ("Report for 9/28/2026 - 10/2/2026" ->
-2026-10-02). Por decisión de Ramon esta serie guarda solo el cierre, sin high ni low;
-el rango mín-máx se lee igual, pero solo para validar que la fila se leyó bien.
+Se guarda el precio del mes más cercano (la primera columna), que es la oferta vigente esa
+semana. Cada punto es {fecha, close}: fecha = fecha del reporte (la del título del post) y
+close = ese precio. Por decisión de Ramon la serie guarda solo el cierre, sin high ni low.
+
+La tabla es una IMAGEN dentro del PDF (no trae texto), así que se lee con OCR (tesseract).
+Para no aceptar una lectura dudosa, la página se lee dos veces con ajustes distintos
+(resolución y modo de segmentación) y ambas lecturas tienen que coincidir en los tres
+valores de la fila; además cada valor debe estar en un rango plausible y los tres meses
+no pueden diferir más de un 20% entre sí. Si algo no calza, ese reporte se descarta y se
+avisa: nunca se adivina ni se convierte en 0 (ver reglas en CLAUDE.md).
 
 Uso:
-  python scripts/fetch_ddgs.py      -> baja el reporte vigente (URL fija que USDA
-                                       sobrescribe cada semana) y lo fusiona. Lo corre el cron.
-  python scripts/historico_ddgs.py  -> construye el histórico completo desde los archivos
-                                       de USDA (ver ese script).
+  python scripts/fetch_ddgs.py      -> lee los reportes más recientes (primera página del
+                                       listado) y los fusiona. Lo corre el cron diario.
+  python scripts/historico_ddgs.py  -> construye el histórico desde enero de 2021.
 
-El reporte AMS_3616 existe desde julio de 2022. Antes de eso USDA no publicaba un precio
-"FOB Vessel" para el Golfo (el reporte diario antiguo traía "CIF NOLA", que es otra base
-de precio), así que esta serie empieza el 2022-07-22 y NO se rellena hacia atrás.
+Este script es independiente de fetch_and_update.py: si USGC cambia su formato, falla solo
+esto y el pipeline de Yahoo sigue igual.
 
-Reglas de integridad (ver CLAUDE.md): un dato que no se puede leer con certeza se reporta
-y se descarta, nunca se convierte en 0 ni se aproxima. La serie se fusiona por fecha y
-nunca se reemplaza completa. Este script es independiente de fetch_and_update.py: si
-USDA cambia su formato, falla solo esto y el pipeline de Yahoo sigue igual.
-
-Requiere `pdftotext` (paquete poppler-utils).
+Requiere `pdftoppm` (poppler-utils) y `tesseract` (tesseract-ocr).
 """
 import datetime as dt
 import html
@@ -45,35 +46,35 @@ from zoneinfo import ZoneInfo
 ROOT = Path(__file__).parent.parent
 DOC_PATH = ROOT / "data" / "historia" / "ddgs_fob_gulf.json"
 
-URL_VIGENTE = "https://www.ams.usda.gov/mnreports/ams_3616.pdf"
-ESMIS = "https://esmis.nal.usda.gov"
-ESMIS_LISTADO = ESMIS + "/publication/national-weekly-ethanol-report?page={page}"
-MMN = "https://mymarketnews.ams.usda.gov/filerepo/"
-MMN_LISTADO = MMN + "reports?field_slug_id_value=3616&page={page}"
+LISTADO = "https://grains.org/ddgs_report/"
+LISTADO_PAGINA = LISTADO + "page/{page}/"
 HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
 
-# Rango de plausibilidad en USD/ton corta. DDGS en el Golfo ha estado entre ~150 y ~350
-# en la última década; esto solo atrapa errores de lectura groseros (p. ej. un 0, o un
-# número de otra columna), no pretende juzgar el mercado.
-PRECIO_MIN, PRECIO_MAX = 50.0, 1000.0
+# Rango de plausibilidad en USD/ton métrica. DDGS FOB Golfo ha estado entre ~180 y ~400
+# desde 2021; esto solo atrapa errores de lectura groseros, no pretende juzgar el mercado.
+PRECIO_MIN, PRECIO_MAX = 100, 700
+DIFERENCIA_MAX_ENTRE_MESES = 0.20
+
+MESES = ["january", "february", "march", "april", "may", "june", "july", "august",
+         "september", "october", "november", "december"]
 
 META = {
     "id": "ddgs_fob_gulf",
     "nombre": "DDGS FOB Golfo (buque)",
-    "ticker": "USDA AMS_3616",
-    "unidad": "USD/ton corta",
-    "dec": 2,
+    "ticker": "USGC DDGS Price Table",
+    "unidad": "USD/ton métrica",
+    "dec": 0,
     "freq": "semanal",
     "cadencia": "Semanal",
-    "exchange": "USDA AMS",
-    "contrato": "Distillers Grain Dried 10%, New Orleans, FOB Ocean Vessel",
-    "fuente": "USDA AMS National Weekly Ethanol Report (AMS_3616)",
-    "fuente_url": URL_VIGENTE,
+    "exchange": "USGC / World Perspectives",
+    "contrato": "FOB Vessel GULF, mín. 35% proteína+grasa, oferta del mes más cercano",
+    "fuente": "U.S. Grains & BioProducts Council, Weekly DDGS Market Report (tabla de la pág. 2)",
+    "fuente_url": LISTADO,
 }
 
 
 class FormatoInesperado(Exception):
-    """El PDF no tiene la forma esperada. Nunca se adivina: se reporta y se descarta."""
+    """El reporte no tiene la forma esperada. Nunca se adivina: se reporta y se descarta."""
 
 
 def descargar(url, intentos=4):
@@ -81,7 +82,7 @@ def descargar(url, intentos=4):
     for i in range(intentos):
         try:
             req = urllib.request.Request(url, headers=HEADERS)
-            with urllib.request.urlopen(req, timeout=90) as resp:
+            with urllib.request.urlopen(req, timeout=60) as resp:
                 return resp.read()
         except urllib.error.HTTPError as e:
             if e.code < 500:
@@ -93,124 +94,102 @@ def descargar(url, intentos=4):
     raise ultimo_error
 
 
-def pdf_a_texto(pdf_bytes):
+# --- Listado y posts ----------------------------------------------------------------------
+
+def posts_de_pagina(page):
+    """URLs de los posts de una página del listado (del más nuevo al más viejo)."""
+    url = LISTADO if page == 1 else LISTADO_PAGINA.format(page=page)
+    h = descargar(url).decode("utf-8", "replace")
+    urls = re.findall(r'href="(https://grains\.org/ddgs_report/[^"/#?]+/)"', h)
+    return [u for u in dict.fromkeys(urls) if not u.endswith(("/feed/",)) and "/page/" not in u]
+
+
+def fecha_de_titulo(titulo):
+    """'DDGS Weekly Market Report – August 20,2026' -> date(2026, 8, 20)."""
+    m = re.search(r"(" + "|".join(MESES) + r")\.?\s+(\d{1,2})\s*,\s*(\d{4})", titulo, re.I)
+    if not m:
+        raise FormatoInesperado(f"no se encontró una fecha en el título: {titulo!r}")
+    return dt.date(int(m.group(3)), MESES.index(m.group(1).lower()) + 1, int(m.group(2)))
+
+
+def leer_post(url):
+    """Devuelve (fecha_del_reporte, url_del_pdf)."""
+    h = descargar(url).decode("utf-8", "replace")
+    t = re.search(r"<title>(.*?)</title>", h, re.S)
+    if not t:
+        raise FormatoInesperado("el post no tiene <title>")
+    fecha = fecha_de_titulo(html.unescape(t.group(1)))
+    pdfs = list(dict.fromkeys(re.findall(r'href="(https://grains\.org/wp-content/uploads/[^"]+\.pdf)"', h, re.I)))
+    if not pdfs:
+        raise FormatoInesperado("el post no enlaza ningún PDF")
+    return fecha, html.unescape(pdfs[0])
+
+
+# --- Lectura de la tabla (OCR) ------------------------------------------------------------
+
+def ocr_pagina(pdf_path, pagina, dpi, psm):
+    with tempfile.TemporaryDirectory() as tmp:
+        base = Path(tmp) / "p"
+        subprocess.run(["pdftoppm", "-f", str(pagina), "-l", str(pagina), "-r", str(dpi),
+                        "-gray", "-png", str(pdf_path), str(base)], check=True, capture_output=True)
+        imgs = sorted(Path(tmp).glob("p*.png"))
+        if not imgs:
+            return ""
+        out = subprocess.run(["tesseract", str(imgs[0]), "-", "--psm", str(psm)],
+                             check=True, capture_output=True)
+    return out.stdout.decode("utf-8", "replace")
+
+
+def fila_fob_vessel(texto):
+    """Valores de la fila 'FOB Vessel GULF' en el texto OCR: lista de int o None (N/A)."""
+    for linea in texto.splitlines():
+        m = re.match(r"\s*FOB\s+Vessel\s+G[UuLlEFf]{2,4}\b(.*)$", linea, re.I)
+        if m:
+            valores = []
+            for tok in re.findall(r"N/?A|\d[\d,\.]*", m.group(1), re.I):
+                if tok.upper().replace("/", "") == "NA":
+                    valores.append(None)
+                elif re.fullmatch(r"\d{3}", tok):
+                    valores.append(int(tok))
+                else:
+                    raise FormatoInesperado(f"valor raro en la fila FOB Vessel GULF: {tok!r} ({linea.strip()!r})")
+            return valores
+    return None
+
+
+def leer_tabla(pdf_bytes):
+    """Devuelve (precio_mes_cercano, [los tres valores]) o lanza FormatoInesperado."""
     if not pdf_bytes.startswith(b"%PDF"):
         raise FormatoInesperado("la descarga no es un PDF")
     with tempfile.TemporaryDirectory() as tmp:
         pdf = Path(tmp) / "r.pdf"
         pdf.write_bytes(pdf_bytes)
-        out = subprocess.run(["pdftotext", "-layout", str(pdf), "-"],
-                             capture_output=True, check=True)
-    return out.stdout.decode("utf-8", "replace")
+        # La tabla va en la página 2; por si algún reporte la movió, se prueba 1 y 3 después.
+        for pagina in (2, 1, 3):
+            a = fila_fob_vessel(ocr_pagina(pdf, pagina, 300, 6))
+            if a is None:
+                continue
+            b = fila_fob_vessel(ocr_pagina(pdf, pagina, 400, 4))
+            if a != b:
+                raise FormatoInesperado(f"las dos lecturas OCR no coinciden (pág. {pagina}): {a} vs {b}")
+            break
+        else:
+            raise FormatoInesperado("no se encontró la fila 'FOB Vessel GULF' en las páginas 1-3")
 
-
-def _num(s):
-    return float(s.replace(",", ""))
-
-
-def parse_reporte(texto):
-    """Devuelve (punto, promedio_año_atrás, advertencia) de la fila New Orleans FOB - OV,
-    o lanza FormatoInesperado explicando qué no calzó. punto = {fecha, close, high, low}."""
-    m = re.search(r"Report for\s+(\d{1,2})/(\d{1,2})/(\d{4})\s*-\s*(\d{1,2})/(\d{1,2})/(\d{4})", texto)
-    if not m:
-        raise FormatoInesperado("no se encontró la línea 'Report for M/D/AAAA - M/D/AAAA'")
-    fecha = dt.date(int(m.group(6)), int(m.group(4)), int(m.group(5)))
-
-    # Solo dentro de la tabla de DDGS seco: desde "Distillers Grain Dried" hasta la
-    # siguiente tabla de "Distillers Grain" (Modified Wet / Wet) o el fin del texto.
-    ini = texto.find("Distillers Grain Dried")
-    if ini < 0:
-        raise FormatoInesperado("no se encontró la tabla 'Distillers Grain Dried'")
-    fin = texto.find("Distillers Grain", ini + len("Distillers Grain Dried"))
-    seccion = texto[ini: fin if fin > 0 else len(texto)]
-
-    exp = seccion.find("Export Point")
-    if exp < 0:
-        raise FormatoInesperado("la tabla de DDGS seco no tiene subsección 'Export Point'")
-
-    filas = [l for l in seccion[exp:].splitlines() if l.strip().startswith("New Orleans")]
-    # pdftotext a veces repite una línea idéntica; se ignoran duplicados exactos.
-    filas = list(dict.fromkeys(l.strip() for l in filas))
-    filas_ov = [l for l in filas if re.search(r"FOB\s*-\s*OV\b", l)]
-    if len(filas_ov) != 1:
-        raise FormatoInesperado(f"se esperaba 1 fila 'New Orleans ... FOB - OV', hay {len(filas_ov)}: {filas}")
-
-    campos = re.split(r"\s{2,}", filas_ov[0])
-    i_flete = next((i for i, c in enumerate(campos) if re.fullmatch(r"FOB\s*-\s*OV", c)), None)
-    if i_flete is None or len(campos) < 4:
-        raise FormatoInesperado(f"fila con columnas inesperadas: {campos}")
-
-    rango = campos[2]
-    mr = re.fullmatch(r"(\d[\d,]*\.\d+)(?:\s*-\s*(\d[\d,]*\.\d+))?", rango)
-    if not mr:
-        raise FormatoInesperado(f"la columna de precio no es 'mín-máx' ni un número: {rango!r}")
-    low = _num(mr.group(1))
-    high = _num(mr.group(2)) if mr.group(2) else low
-
-    # Entre el precio y el flete vienen: [cambio (texto: UNCH/UP/DN), si hay]
-    # [promedio] [año atrás, si hay]. Los numéricos puros son promedio y año atrás.
-    numericos = [c for c in campos[3:i_flete] if re.fullmatch(r"\d[\d,]*\.\d+", c)]
-    if not numericos:
-        raise FormatoInesperado(f"no se encontró la columna 'Average': {campos}")
-    promedio = _num(numericos[0])
-    anio_atras = _num(numericos[1]) if len(numericos) > 1 else None
-
-    for v in (low, high, promedio):
+    if len(a) != 3:
+        raise FormatoInesperado(f"se esperaban 3 valores (3 meses) en la fila, hay {len(a)}: {a}")
+    if a[0] is None:
+        raise FormatoInesperado(f"el mes más cercano viene como N/A: {a}")
+    numeros = [v for v in a if v is not None]
+    for v in numeros:
         if not (PRECIO_MIN <= v <= PRECIO_MAX):
-            raise FormatoInesperado(f"precio fuera de rango plausible ({v}): {campos}")
-    if low > high:
-        raise FormatoInesperado(f"mínimo mayor que máximo: {campos}")
-
-    advertencia = None
-    if not (low <= promedio <= high):
-        # Igual que sanitize_high_low() del pipeline de Yahoo: nunca se toca close,
-        # solo se ensancha el rango con el propio promedio, y se avisa.
-        advertencia = f"{fecha}: promedio {promedio} fuera de [{low}, {high}]; se ensancha el rango"
-        low, high = min(low, promedio), max(high, promedio)
-
-    punto = {"fecha": fecha.isoformat(), "close": promedio, "high": high, "low": low}
-    return punto, anio_atras, advertencia
+            raise FormatoInesperado(f"precio fuera de rango plausible ({v}): {a}")
+    if max(numeros) > min(numeros) * (1 + DIFERENCIA_MAX_ENTRE_MESES):
+        raise FormatoInesperado(f"los tres meses difieren demasiado entre sí (¿mala lectura?): {a}")
+    return a[0], a
 
 
-def links_esmis():
-    """PDFs de AMS_3616 en el archivo ESMIS de USDA (biblioteca NAL), del más antiguo al
-    más nuevo. Cubre jul-2022 a sep-2025: ahí dejó de actualizarse."""
-    vistos, links, page = set(), [], 0
-    while True:
-        h = descargar(ESMIS_LISTADO.format(page=page)).decode("utf-8", "replace")
-        nuevos = [ESMIS + html.unescape(l) for l in
-                  re.findall(r'href="(/sites/default/release-files/[^"]+AMS_3616\.PDF)"', h, re.I)]
-        nuevos = [l for l in nuevos if l not in vistos]
-        if not nuevos:
-            break
-        for l in nuevos:
-            vistos.add(l)
-            links.append(l)
-        page += 1
-        if page > 500:
-            raise RuntimeError("el listado de ESMIS no termina; revisar paginación")
-    return links[::-1]
-
-
-def links_mymarketnews():
-    """Todos los PDF de AMS_3616 del archivo de MyMarketNews, del más antiguo al más nuevo
-    (ordenados por el correlativo del nombre, ams_3616_00211.pdf). Así, si una misma
-    semana se publicó dos veces (una corrección), gana la publicada después."""
-    links, page = {}, 0
-    while True:
-        h = descargar(MMN_LISTADO.format(page=page)).decode("utf-8", "replace")
-        encontrados = re.findall(r'href="(?:/filerepo/)?(sites/default/files/3616/[^"]+?ams_3616_(\d+)\.pdf)"', h, re.I)
-        nuevos = [(int(n), MMN + html.unescape(l)) for l, n in encontrados if MMN + html.unescape(l) not in links.values()]
-        if not nuevos:
-            break
-        for n, url in nuevos:
-            links[n] = url
-        print(f"  MyMarketNews página {page}: {len(links)} reportes hasta ahora", flush=True)
-        page += 1
-        if page > 200:
-            raise RuntimeError("el listado de MyMarketNews no termina; revisar paginación")
-    return [links[n] for n in sorted(links)]
-
+# --- Serie --------------------------------------------------------------------------------
 
 def cargar_doc():
     if DOC_PATH.exists():
@@ -228,50 +207,30 @@ def merge(serie, nuevos):
     return sorted(by_fecha.values(), key=lambda p: p["fecha"])
 
 
-def chequeo_anio_atras(serie, anio_atras_por_fecha):
-    """Segunda ruta de verificación: cada reporte trae el promedio de hace un año
-    ("Year Ago"), que USDA publica por separado. Si ya tenemos esa semana en la serie,
-    ambos deben coincidir. Un desacuerdo no dice cuál de los dos está mal (puede ser una
-    corrección posterior de USDA), así que no se borra nada: se avisa para revisarlo."""
-    por_fecha = {dt.date.fromisoformat(p["fecha"]): p for p in serie}
-    avisos = []
-    for f, ya in anio_atras_por_fecha.items():
-        f = dt.date.fromisoformat(f)
-        previo = next((por_fecha[d] for d in (f - dt.timedelta(days=k) for k in (364, 363, 365, 362, 366))
-                       if d in por_fecha), None)
-        if previo and abs(previo["close"] - ya) > 0.01 * ya:
-            avisos.append(f"{f}: 'Year Ago' del reporte = {ya}, pero la serie tiene "
-                          f"{previo['close']} el {previo['fecha']} (revisar)")
-    return avisos
-
-
-def actualizar(urls, advertencias, verbose=False):
-    """Lee cada PDF de `urls` (del más antiguo al más nuevo) y fusiona los precios en
-    data/historia/ddgs_fob_gulf.json. Lo usan este script (reporte vigente) y
-    historico_ddgs.py (archivo completo). Devuelve cuántos reportes se leyeron bien."""
-    nuevos, anio_atras_por_fecha = [], {}
-    for url in urls:
+def actualizar(posts, advertencias, desde=None, solo_faltantes=True, verbose=False):
+    """Lee cada post de `posts`, saca el precio y lo fusiona en el JSON. Si `desde` viene,
+    se ignoran los reportes anteriores a esa fecha; con `solo_faltantes` se saltan las
+    semanas que ya están en la serie. Devuelve (leídos, fecha_más_antigua)."""
+    ya = {p["fecha"] for p in cargar_doc().get("serie", [])} if solo_faltantes else set()
+    nuevos, mas_antigua = [], None
+    for url in posts:
         try:
-            punto, anio_atras, adv = parse_reporte(pdf_a_texto(descargar(url)))
+            fecha, pdf_url = leer_post(url)
+            mas_antigua = min(mas_antigua or fecha, fecha)
+            if (desde and fecha < desde) or fecha.isoformat() in ya:
+                continue
+            precio, fila = leer_tabla(descargar(pdf_url))
         except (FormatoInesperado, urllib.error.URLError, TimeoutError,
                 subprocess.CalledProcessError) as e:
             advertencias.append(f"{url}: {e} — se descarta, no se inventa nada")
             continue
-        if adv:
-            advertencias.append(adv)
-        # Se guarda solo el cierre (el promedio semanal de USDA), como pidió Ramon.
-        # El rango mín-máx se usa arriba para validar la lectura, pero no se guarda.
-        nuevos.append({"fecha": punto["fecha"], "close": punto["close"]})
-        if anio_atras is not None:
-            anio_atras_por_fecha[punto["fecha"]] = anio_atras
+        nuevos.append({"fecha": fecha.isoformat(), "close": precio})
         if verbose:
-            print(f"  {punto['fecha']}  close={punto['close']:.2f}")
+            print(f"  {fecha}  close={precio}  fila={fila}", flush=True)
 
     doc = cargar_doc()
     serie_antes = doc.get("serie", [])
     serie = merge(serie_antes, nuevos)
-    advertencias += chequeo_anio_atras(serie, anio_atras_por_fecha)
-
     if serie != serie_antes or any(doc.get(k) != v for k, v in META.items()):
         doc.update(META)
         doc["serie"] = serie
@@ -279,11 +238,12 @@ def actualizar(urls, advertencias, verbose=False):
         DOC_PATH.parent.mkdir(parents=True, exist_ok=True)
         with open(DOC_PATH, "w", encoding="utf-8") as f:
             json.dump(doc, f, ensure_ascii=False, indent=2)
-        u = serie[-1]
-        print(f"DDGS FOB Golfo: n={len(serie)} desde {serie[0]['fecha']} último={u['fecha']} close={u['close']}")
+        if serie:
+            u = serie[-1]
+            print(f"DDGS FOB Golfo: n={len(serie)} desde {serie[0]['fecha']} último={u['fecha']} close={u['close']}")
     else:
-        print("Sin cambios: el reporte ya estaba en la serie.")
-    return len(nuevos)
+        print("Sin cambios: los reportes ya estaban en la serie.")
+    return len(nuevos), mas_antigua
 
 
 def terminar(advertencias, leidos):
@@ -298,8 +258,19 @@ def terminar(advertencias, leidos):
 
 def main():
     advertencias = []
-    leidos = actualizar([URL_VIGENTE], advertencias)
-    terminar(advertencias, leidos)
+    # Los posts de la primera página (las últimas ~10 semanas): así, si una corrida falló,
+    # la siguiente recupera la semana perdida.
+    posts = posts_de_pagina(1)
+    leidos, _ = actualizar(posts, advertencias)
+    if advertencias:
+        print("\nAdvertencias de esta corrida:")
+        for a in advertencias:
+            print(" -", a)
+    # Falla en voz alta si no se pudo leer el reporte más reciente (y no estaba ya cargado).
+    doc = cargar_doc()
+    if any(a.startswith(posts[0]) for a in advertencias):
+        sys.exit("ERROR: no se pudo leer el reporte más reciente de DDGS; revisar el log.")
+    print(f"OK: {leidos} semana(s) nueva(s); último dato {doc['serie'][-1] if doc.get('serie') else 'ninguno'}")
 
 
 if __name__ == "__main__":
