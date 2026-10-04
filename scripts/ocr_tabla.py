@@ -32,7 +32,7 @@ import numpy as np
 from PIL import Image
 
 NUM = re.compile(r"^(\d{3}|N/?A)$", re.I)
-ETIQUETA = re.compile(r"(F\w{0,2}\s*)?Ves+[eo]l", re.I)
+ETIQUETA = re.compile(r"[O0]?B\s*Ves+[eo]l", re.I)  # "FOB Vessel" (la F a veces queda cortada)
 SOLO_NUMEROS = ("-c", "tessedit_char_whitelist=0123456789N/A ")
 TIMEOUT_OCR = 90  # segundos por llamada a tesseract
 
@@ -122,7 +122,7 @@ def _metodo_texto(img):
         g = _ancho_minimo(img, ancho)
         for umbral in (140, 180):
             for linea in _tesseract(_blanco_y_negro(g, umbral), 6).splitlines():
-                m = re.search(r"(?:F\w{0,2}\s*)?Ves+[eo]l\s*\S*\s+(.*)$", linea, re.I)
+                m = re.search(ETIQUETA.pattern + r"\s*\S*\s+(.*)$", linea, re.I)
                 if m:
                     lecturas.append(_tokens(m.group(1)))
         if img.width >= ancho:
@@ -130,29 +130,22 @@ def _metodo_texto(img):
     return lecturas
 
 
-def _parece_tabla(img):
-    # La tabla es alta (20+ filas); las franjas de encabezado/pie y los logos no.
-    return img.height >= 300 and img.width / img.height < 3
+def _candidatas(img):
+    # La tabla tiene muchas filas: ni franjas anchas (encabezado/pie) ni imágenes en blanco
+    # (las máscaras de transparencia que pdfimages extrae aparte).
+    return img.height >= 150 and img.width / img.height < 3 and np.array(img.convert("L")).std() > 5
 
 
 def _imagenes(pdf_path, pagina):
-    """La imagen de la tabla extraída del PDF y, como segunda fuente, la misma zona en la
-    página renderizada. Si el PDF no trae la tabla como imagen, solo la página completa."""
+    """(imágenes candidatas a ser la tabla, de mayor a menor; página renderizada a 300 dpi)."""
     with tempfile.TemporaryDirectory() as d:
         subprocess.run(["pdfimages", "-f", str(pagina), "-l", str(pagina), "-png",
                         str(pdf_path), f"{d}/i"], check=True, capture_output=True)
-        tablas = [i for i in (Image.open(p) for p in Path(d).glob("i-*.png")) if _parece_tabla(i)]
+        imgs = [Image.open(p) for p in Path(d).glob("i-*.png")]
+        imgs = sorted((i.copy() for i in imgs if _candidatas(i)), key=lambda i: -i.width * i.height)
         subprocess.run(["pdftoppm", "-f", str(pagina), "-l", str(pagina), "-r", "300", "-gray",
                         "-png", "-singlefile", str(pdf_path), f"{d}/p"], check=True, capture_output=True)
-        pagina_img = Image.open(f"{d}/p.png").copy()
-        if not tablas:
-            yield pagina_img
-            return
-        tabla = max(tablas, key=lambda i: i.width * i.height).copy()
-        yield tabla
-        recorte = _ubicar(pagina_img, tabla)
-        if recorte is not None:
-            yield recorte
+        return imgs, Image.open(f"{d}/p.png").copy()
 
 
 def _ubicar(pagina_img, tabla):
@@ -184,9 +177,20 @@ def _ubicar(pagina_img, tabla):
                             min(pagina_img.height, (y + h) * escala + m)))
 
 
+def _leer(img):
+    return _metodo_filas(img) + _metodo_texto(img)
+
+
 def lecturas(pdf_path, pagina):
-    todas = []
-    for img in _imagenes(pdf_path, pagina):
-        todas += _metodo_filas(img)
-        todas += _metodo_texto(img)
-    return todas
+    """Lecturas de la fila FOB Vessel en esa página. La tabla es la imagen donde aparece
+    esa fila (se prueban de la más grande a la más chica: el resto son logos o gráficos);
+    se lee la imagen original y la misma zona en la página renderizada."""
+    imgs, pagina_img = _imagenes(pdf_path, pagina)
+    for img in imgs:
+        todas = _leer(img)
+        if any(todas):
+            recorte = _ubicar(pagina_img, img)
+            if recorte is not None:
+                todas += _leer(recorte)
+            return todas
+    return []

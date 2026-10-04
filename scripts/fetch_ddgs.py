@@ -149,6 +149,14 @@ def _plausible(valores):
             and max(numeros) <= min(numeros) * (1 + DIFERENCIA_MAX_ENTRE_MESES))
 
 
+def _paginas(pdf):
+    info = subprocess.run(["pdfinfo", str(pdf)], capture_output=True, check=True, text=True).stdout
+    m = re.search(r"^Pages:\s+(\d+)", info, re.M)
+    if not m:
+        raise FormatoInesperado("no se pudo leer el número de páginas del PDF")
+    return int(m.group(1))
+
+
 def leer_tabla(pdf_bytes):
     """Devuelve (precio_mes_cercano, [los tres valores]) o lanza FormatoInesperado."""
     if not pdf_bytes.startswith(b"%PDF"):
@@ -156,17 +164,20 @@ def leer_tabla(pdf_bytes):
     with tempfile.TemporaryDirectory() as tmp:
         pdf = Path(tmp) / "r.pdf"
         pdf.write_bytes(pdf_bytes)
-        # La tabla va en la página 2; por si algún reporte la movió, se prueba 1 y 3 después.
-        for pagina in (2, 1, 3):
-            todas = ocr_tabla.lecturas(pdf, pagina)
-            if todas:
+        n = _paginas(pdf)
+        # La tabla va en la página 2; algunos reportes la traen en otra, así que se sigue
+        # buscando en las demás hasta encontrar lecturas válidas de la fila.
+        todas, validas = [], []
+        for pagina in [2] + [p for p in range(1, n + 1) if p != 2]:
+            lect = ocr_tabla.lecturas(pdf, pagina)
+            todas += lect
+            validas = [tuple(_a_valores(l)) for l in lect
+                       if len(l) == 3 and all(ocr_tabla.NUM.match(t) for t in l)]
+            validas = [v for v in validas if _plausible(list(v))]
+            if validas:
                 break
-        else:
-            raise FormatoInesperado("no se encontró la fila 'FOB Vessel GULF' en las páginas 1-3")
-
-    validas = [tuple(_a_valores(l)) for l in todas
-               if len(l) == 3 and all(ocr_tabla.NUM.match(t) for t in l)]
-    validas = [v for v in validas if _plausible(list(v))]
+    if not todas:
+        raise FormatoInesperado(f"no se encontró la fila 'FOB Vessel GULF' en ninguna de las {n} páginas")
     if not validas:
         raise FormatoInesperado(f"ninguna lectura OCR válida de la fila: {todas}")
     # Lo que se guarda es el primer valor (mes más cercano): el consenso se exige sobre él.
