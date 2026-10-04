@@ -48,6 +48,9 @@ jobs:
           fi
 
       - name: Commit y push si hubo cambios
+        # También si el paso anterior terminó en rojo: lo que sí se leyó ya está validado
+        # y se guarda; el rojo queda visible para revisar qué faltó.
+        if: success() || failure()
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"

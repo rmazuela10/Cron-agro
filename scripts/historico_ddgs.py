@@ -23,6 +23,7 @@ Uso:  python scripts/historico_ddgs.py   (requiere pdftotext, del paquete popple
 """
 import datetime as dt
 import re
+import sys
 import urllib.error
 
 from fetch_ddgs import (URL_VIGENTE, actualizar, cargar_doc, links_esmis,
@@ -61,6 +62,10 @@ def main():
     # 3) El vigente al final: es la publicación más reciente, así gana en su semana.
     leidos += actualizar([URL_VIGENTE], advertencias, verbose=True)
     terminar(advertencias, leidos)
+    # Lo que sí se leyó ya quedó guardado. Si un archivo no respondió, el job termina en
+    # rojo para que se note que faltan semanas; basta con volver a correrlo más tarde.
+    if any(a.startswith("No se pudo listar") for a in advertencias):
+        sys.exit("ATENCIÓN: un archivo de USDA no respondió; pueden faltar semanas. Reintentar más tarde.")
 
 
 if __name__ == "__main__":
