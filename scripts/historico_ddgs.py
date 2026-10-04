@@ -11,12 +11,14 @@ Se puede correr de nuevo cuando se quiera: solo agrega las semanas que faltan. C
 Uso:  python scripts/historico_ddgs.py [--rehacer]
 """
 import datetime as dt
+import os
 import sys
 import urllib.error
 
 from fetch_ddgs import actualizar, posts_de_pagina, terminar
 
 DESDE = dt.date(2021, 1, 1)
+HILOS = os.cpu_count() or 2  # PDFs leídos a la vez (el OCR es lento)
 
 
 def main():
@@ -33,7 +35,8 @@ def main():
             break
         print(f"Listado página {page}: {len(posts)} reportes", flush=True)
         n, mas_antigua = actualizar(posts, advertencias, desde=DESDE,
-                                    solo_faltantes=not rehacer, verbose=True)
+                                    solo_faltantes=not rehacer, verbose=True,
+                                    hilos=HILOS)
         leidos += n
         if mas_antigua and mas_antigua < DESDE:
             break  # ya llegamos a 2020: no se va más atrás

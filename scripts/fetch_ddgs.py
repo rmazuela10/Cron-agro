@@ -42,6 +42,7 @@ import time
 import urllib.error
 import urllib.request
 from collections import Counter
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -192,26 +193,37 @@ def merge(serie, nuevos):
     return sorted(by_fecha.values(), key=lambda p: p["fecha"])
 
 
-def actualizar(posts, advertencias, desde=None, solo_faltantes=True, verbose=False):
+def _leer_un_post(url, desde, ya):
+    """Devuelve (fecha, precio, fila) o (fecha, None, None) si se salta; lanza si falla."""
+    fecha, pdf_url = leer_post(url)
+    if (desde and fecha < desde) or fecha.isoformat() in ya:
+        return fecha, None, None
+    precio, fila = leer_tabla(descargar(pdf_url))
+    return fecha, precio, fila
+
+
+def actualizar(posts, advertencias, desde=None, solo_faltantes=True, verbose=False, hilos=1):
     """Lee cada post de `posts`, saca el precio y lo fusiona en el JSON. Si `desde` viene,
     se ignoran los reportes anteriores a esa fecha; con `solo_faltantes` se saltan las
-    semanas que ya están en la serie. Devuelve (leídos, fecha_más_antigua)."""
+    semanas que ya están en la serie. Con `hilos` > 1 lee varios PDFs a la vez (el OCR es
+    lento). Devuelve (leídos, fecha_más_antigua)."""
     ya = {p["fecha"] for p in cargar_doc().get("serie", [])} if solo_faltantes else set()
     nuevos, mas_antigua = [], None
-    for url in posts:
-        try:
-            fecha, pdf_url = leer_post(url)
-            mas_antigua = min(mas_antigua or fecha, fecha)
-            if (desde and fecha < desde) or fecha.isoformat() in ya:
+    with ThreadPoolExecutor(max_workers=hilos) as ex:
+        futuros = [(url, ex.submit(_leer_un_post, url, desde, ya)) for url in posts]
+        for url, futuro in futuros:
+            try:
+                fecha, precio, fila = futuro.result()
+            except (FormatoInesperado, urllib.error.URLError, TimeoutError,
+                    subprocess.CalledProcessError) as e:
+                advertencias.append(f"{url}: {e} — se descarta, no se inventa nada")
                 continue
-            precio, fila = leer_tabla(descargar(pdf_url))
-        except (FormatoInesperado, urllib.error.URLError, TimeoutError,
-                subprocess.CalledProcessError) as e:
-            advertencias.append(f"{url}: {e} — se descarta, no se inventa nada")
-            continue
-        nuevos.append({"fecha": fecha.isoformat(), "close": precio})
-        if verbose:
-            print(f"  {fecha}  close={precio}  fila={fila}", flush=True)
+            mas_antigua = min(mas_antigua or fecha, fecha)
+            if precio is None:
+                continue
+            nuevos.append({"fecha": fecha.isoformat(), "close": precio})
+            if verbose:
+                print(f"  {fecha}  close={precio}  fila={fila}", flush=True)
 
     doc = cargar_doc()
     serie_antes = doc.get("serie", [])

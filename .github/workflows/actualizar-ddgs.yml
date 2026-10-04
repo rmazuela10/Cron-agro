@@ -27,6 +27,9 @@ permissions:
 jobs:
   actualizar:
     runs-on: ubuntu-latest
+    timeout-minutes: 180  # el histórico completo (~300 PDFs con OCR) tarda; el diario, minutos
+    env:
+      OMP_THREAD_LIMIT: "1"  # tesseract en un solo hilo: se leen varios PDFs en paralelo
     steps:
       - name: Clonar el repositorio
         uses: actions/checkout@v4
@@ -37,14 +40,16 @@ jobs:
           python-version: "3.12"
 
       - name: Instalar pdftoppm y tesseract (OCR de la tabla del PDF)
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq poppler-utils tesseract-ocr
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq poppler-utils tesseract-ocr
+          pip install -q pillow numpy
 
       - name: Bajar el reporte de USGC, leer la tabla y fusionar
         run: |
           if [ "${{ inputs.historico }}" = "true" ]; then
-            python3 scripts/historico_ddgs.py
+            python3 -u scripts/historico_ddgs.py
           else
-            python3 scripts/fetch_ddgs.py
+            python3 -u scripts/fetch_ddgs.py
           fi
 
       - name: Commit y push si hubo cambios

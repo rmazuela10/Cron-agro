@@ -48,32 +48,16 @@ Variables actuales (id → ticker Yahoo): maiz_us ZC=F, trigo_us ZW=F, soya_us Z
 * Yahoo a veces entrega `close` fuera de `[low, high]` (muy frecuente en PEN=X): ya cubierto por sanitize_high_low.
 * Cambio de horario de Chile: el cron actual no fija horas, así que no requiere ajuste.
 
-## TAREA PENDIENTE: agregar DDGS (derivado del maíz) con histórico desde 2017
+## DDGS FOB Vessel Gulf (fuente: reporte semanal de USGC)
 
-Objetivo: nueva variable semanal "DDGS FOB Vessel Gulf" (USD/ton) en `data/historia/ddgs_fob_gulf.json` (mismo formato; `freq` semanal, un punto por semana), con un script y workflow SEPARADOS del de Yahoo (`scripts/fetch_ddgs.py` + `.github/workflows/actualizar-ddgs.yml`, cron diario basta: la fuente es semanal). No tocar `fetch_and_update.py` ni su workflow.
+Variable semanal en `data/historia/ddgs_fob_gulf.json`, con script y workflow SEPARADOS del de Yahoo (`scripts/fetch_ddgs.py` + `scripts/ocr_tabla.py` + `.github/workflows/actualizar-ddgs.yml`, cron diario 13:00 UTC). No tocar `fetch_and_update.py` ni su workflow.
 
-El usuario pidió construir el histórico desde 2017 y la actualización semanal desde: `https://grains.org/ltamex/resources-page/reports/ddgs_report/` (US Grains & BioProducts Council).
-
-### Hallazgos de la investigación previa (hecha desde un sandbox sin acceso directo a esos sitios; VERIFÍCALOS tú)
-
-* Ese listado es estable (45 páginas, el más nuevo primero). Cada entrada enlaza a un post `https://grains.org/?p=NNNNN` (ID de WordPress sin patrón) que a su vez enlaza a un PDF con nombre tipo `https://grains.org/wp-content/uploads/2026/10/Weekly-DDGS-Market-Report-10.1.26.pdf` (el patrón del nombre cambió con los años: `DDGS-12.9.21.pdf`, `04-20-2023.pdf`, etc.).
-* PDF de oct-2026: el precio absoluto de DDGS aparece solo en gráficos que parecían imágenes sin capa de texto. Como texto solo vienen los spreads ("FOB U.S. Gulf DDGS to SMB spread: $151", "to corn spread: $63.66") y estadísticas de exportación. En un PDF de dic-2021 los gráficos sí tenían etiquetas de texto ("$272.00"). Es decir, el formato cambió con los años. Esta conclusión salió de un extractor de texto con IA (lossy): confírmala descargando los PDFs y usando pdfplumber/pdftotext (y revisando si hay imágenes embebidas) en una muestra de años (2017, 2019, 2021, 2023, 2024, 2026).
-* Algunos posts antiguos (p. ej. `?p=59210`, sep-2024) traen el precio como texto en el HTML: "USDA reported DDGS prices averaged $140 per short ton in the September 20 National Weekly Ethanol Report".
-* El precio que citan viene de USDA AMS National Weekly Ethanol Report, que tiene URL fija sobrescrita cada semana: `https://www.ams.usda.gov/mnreports/ams_3616.pdf` (verificado el 2-oct-2026: "Report for 9/28/2026 - 10/2/2026 – Final"). En la tabla "Distillers Grain Dried 10%", subsección "Export Point", la fila `New Orleans Ask 245.00-260.00 DN 5.00 254.50 191.67 FOB - OV Current` es el FOB Vessel Gulf (columnas: precio min-max, cambio, promedio, año atrás, flete, entrega; `OV` = Ocean Vessel). Texto plano extraíble. (`sj_gr113.txt` es un reporte legado congelado desde 2022: NO usarlo.)
-* La API MARS de USDA AMS (`marsapi.ams.usda.gov`) requiere key gratuita (eAuth, basic-auth); da JSON y archivo histórico.
-
-### Decisión pendiente del usuario (pregúntale antes de construir)
-
-¿Fuente numérica = USDA AMS (primaria, texto extraíble; el link de USGC queda solo como referencia) o USGC (spread + maíz de Yahoo, que sería un número DERIVADO y habría que etiquetarlo así)? Mi recomendación: USDA para el dato, y evaluar MARS API / archivo histórico de USDA para el histórico desde 2017. Solo precio, sin copiar el texto de análisis de USGC (tiene copyright; el número es un hecho, el texto no). Granularidad elegida: solo FOB Vessel Gulf (New Orleans).
-
-Cómo mapear a la serie: `close` = promedio semanal ("Average" de USDA, nunca el punto medio del rango); `fecha` = fin de semana del reporte. Marcar en metadata cadencia "Semanal". Decisión de Ramon (2026-10-04): esta serie guarda solo `{fecha, close}`, sin `high` ni `low`; el rango mín-máx se lee solo para validar la fila.
-
-### Verificación obligatoria antes de dar algo por terminado
-
-* Descargar y parsear a mano 3-4 reportes de épocas distintas y comparar contra lo que se ve en el PDF.
-* Que el parser falle en voz alta (excepción/advertencia) si cambia el formato, nunca que devuelva 0 o un valor inventado.
-* Probar `python scripts/fetch_ddgs.py` en local, y luego "Run workflow" manual en la pestaña Actions antes de confiar en el cron.
-* Rutas: el YAML va en `.github/workflows/` (con el punto). Ojo: pushear archivos de workflows exige el permiso `workflow` en el token (`gh auth login` lo pide).
+* Fuente (decisión de Ramon, 2026-10-04): `https://grains.org/ddgs_report/` (U.S. Grains & BioProducts Council). Cada post semanal enlaza un PDF; en la pág. 2 está la "DDGS Price Table" (USD/ton métrica, de World Perspectives) con la fila "FOB Vessel GULF" y tres columnas de meses. Se guarda la PRIMERA columna (mes más cercano) como `close`; `fecha` = fecha del título del post.
+* La tabla es una IMAGEN (sin capa de texto) y su diseño cambió (grilla naranja 2021-23, filas oscuras 2024, sin grilla desde 2025). Se lee con OCR (tesseract) de muchas formas independientes y se exige consenso (≥3 lecturas idénticas y ≥75% de las válidas), rango 100-700 y los 3 meses a ≤20% entre sí. Si no hay consenso, la semana se descarta y se avisa (nunca se adivina).
+* Histórico: solo desde enero de 2021 (Ramon pidió no ir más atrás). `scripts/historico_ddgs.py` recorre el listado (solo agrega semanas faltantes; `--rehacer` relee todo). Desde Actions: "Run workflow" con `historico` = true.
+* Esta serie guarda solo `{fecha, close}`, sin `high` ni `low` (decisión de Ramon, 2026-10-04). No copiar el texto de análisis de USGC (copyright): solo el número.
+* El proxy del entorno de Claude bloquea grains.org: para probar contra la fuente hay que correr en GitHub Actions.
+* Alternativa descartada: USDA AMS National Weekly Ethanol Report (`ams_3616.pdf`, fila New Orleans FOB OV, USD/short ton). Sirve como cross-check manual si alguna vez hace falta.
 
 ## Fuera de este repo
 
