@@ -13,12 +13,13 @@ Se guarda el precio del mes más cercano (la primera columna), que es la oferta 
 semana. Cada punto es {fecha, close}: fecha = fecha del reporte (la del título del post) y
 close = ese precio. Por decisión de Ramon la serie guarda solo el cierre, sin high ni low.
 
-La tabla es una IMAGEN dentro del PDF (no trae texto), así que se lee con OCR (tesseract).
-Para no aceptar una lectura dudosa, la página se lee dos veces con ajustes distintos
-(resolución y modo de segmentación) y ambas lecturas tienen que coincidir en los tres
-valores de la fila; además cada valor debe estar en un rango plausible y los tres meses
-no pueden diferir más de un 20% entre sí. Si algo no calza, ese reporte se descarta y se
-avisa: nunca se adivina ni se convierte en 0 (ver reglas en CLAUDE.md).
+La tabla es una IMAGEN dentro del PDF (no trae texto), así que se lee con OCR (tesseract):
+ver ocr_tabla.py. Para no aceptar una lectura dudosa, la fila se lee de muchas formas
+independientes y se exige consenso (la misma lectura de los tres valores en al menos 3
+lecturas y en al menos 3/4 de las lecturas válidas). Además cada valor debe estar en un
+rango plausible y los tres meses no pueden diferir más de un 20% entre sí. Si algo no
+calza, ese reporte se descarta y se avisa: nunca se adivina ni se convierte en 0 (ver
+reglas en CLAUDE.md).
 
 Uso:
   python scripts/fetch_ddgs.py      -> lee los reportes más recientes (primera página del
@@ -28,7 +29,7 @@ Uso:
 Este script es independiente de fetch_and_update.py: si USGC cambia su formato, falla solo
 esto y el pipeline de Yahoo sigue igual.
 
-Requiere `pdftoppm` (poppler-utils) y `tesseract` (tesseract-ocr).
+Requiere poppler-utils, tesseract-ocr, Pillow y numpy.
 """
 import datetime as dt
 import html
@@ -40,8 +41,11 @@ import tempfile
 import time
 import urllib.error
 import urllib.request
+from collections import Counter
 from pathlib import Path
 from zoneinfo import ZoneInfo
+
+import ocr_tabla
 
 ROOT = Path(__file__).parent.parent
 DOC_PATH = ROOT / "data" / "historia" / "ddgs_fob_gulf.json"
@@ -127,34 +131,21 @@ def leer_post(url):
 
 # --- Lectura de la tabla (OCR) ------------------------------------------------------------
 
-def ocr_pagina(pdf_path, pagina, dpi, psm):
-    with tempfile.TemporaryDirectory() as tmp:
-        base = Path(tmp) / "p"
-        subprocess.run(["pdftoppm", "-f", str(pagina), "-l", str(pagina), "-r", str(dpi),
-                        "-gray", "-png", str(pdf_path), str(base)], check=True, capture_output=True)
-        imgs = sorted(Path(tmp).glob("p*.png"))
-        if not imgs:
-            return ""
-        out = subprocess.run(["tesseract", str(imgs[0]), "-", "--psm", str(psm)],
-                             check=True, capture_output=True)
-    return out.stdout.decode("utf-8", "replace")
+# Consenso exigido entre las lecturas OCR válidas de la fila (ver ocr_tabla.py): la lectura
+# ganadora necesita al menos 3 votos y al menos 3/4 de las lecturas válidas.
+VOTOS_MIN, CONSENSO_MIN = 3, 0.75
 
 
-def fila_fob_vessel(texto):
-    """Valores de la fila 'FOB Vessel GULF' en el texto OCR: lista de int o None (N/A)."""
-    for linea in texto.splitlines():
-        m = re.match(r"\s*FOB\s+Vessel\s+G[UuLlEFf]{2,4}\b(.*)$", linea, re.I)
-        if m:
-            valores = []
-            for tok in re.findall(r"N/?A|\d[\d,\.]*", m.group(1), re.I):
-                if tok.upper().replace("/", "") == "NA":
-                    valores.append(None)
-                elif re.fullmatch(r"\d{3}", tok):
-                    valores.append(int(tok))
-                else:
-                    raise FormatoInesperado(f"valor raro en la fila FOB Vessel GULF: {tok!r} ({linea.strip()!r})")
-            return valores
-    return None
+def _a_valores(lectura):
+    return [None if t == "N/A" else int(t) for t in lectura]
+
+
+def _plausible(valores):
+    if len(valores) != 3 or valores[0] is None:
+        return False
+    numeros = [v for v in valores if v is not None]
+    return (all(PRECIO_MIN <= v <= PRECIO_MAX for v in numeros)
+            and max(numeros) <= min(numeros) * (1 + DIFERENCIA_MAX_ENTRE_MESES))
 
 
 def leer_tabla(pdf_bytes):
@@ -166,27 +157,21 @@ def leer_tabla(pdf_bytes):
         pdf.write_bytes(pdf_bytes)
         # La tabla va en la página 2; por si algún reporte la movió, se prueba 1 y 3 después.
         for pagina in (2, 1, 3):
-            a = fila_fob_vessel(ocr_pagina(pdf, pagina, 300, 6))
-            if a is None:
-                continue
-            b = fila_fob_vessel(ocr_pagina(pdf, pagina, 400, 4))
-            if a != b:
-                raise FormatoInesperado(f"las dos lecturas OCR no coinciden (pág. {pagina}): {a} vs {b}")
-            break
+            todas = ocr_tabla.lecturas(pdf, pagina)
+            if todas:
+                break
         else:
             raise FormatoInesperado("no se encontró la fila 'FOB Vessel GULF' en las páginas 1-3")
 
-    if len(a) != 3:
-        raise FormatoInesperado(f"se esperaban 3 valores (3 meses) en la fila, hay {len(a)}: {a}")
-    if a[0] is None:
-        raise FormatoInesperado(f"el mes más cercano viene como N/A: {a}")
-    numeros = [v for v in a if v is not None]
-    for v in numeros:
-        if not (PRECIO_MIN <= v <= PRECIO_MAX):
-            raise FormatoInesperado(f"precio fuera de rango plausible ({v}): {a}")
-    if max(numeros) > min(numeros) * (1 + DIFERENCIA_MAX_ENTRE_MESES):
-        raise FormatoInesperado(f"los tres meses difieren demasiado entre sí (¿mala lectura?): {a}")
-    return a[0], a
+    validas = [tuple(_a_valores(l)) for l in todas
+               if len(l) == 3 and all(ocr_tabla.NUM.match(t) for t in l)]
+    validas = [v for v in validas if _plausible(list(v))]
+    if not validas:
+        raise FormatoInesperado(f"ninguna lectura OCR válida de la fila: {todas}")
+    ganadora, votos = Counter(validas).most_common(1)[0]
+    if votos < VOTOS_MIN or votos / len(validas) < CONSENSO_MIN:
+        raise FormatoInesperado(f"sin consenso entre lecturas OCR: {Counter(validas).most_common(4)}")
+    return ganadora[0], list(ganadora)
 
 
 # --- Serie --------------------------------------------------------------------------------
