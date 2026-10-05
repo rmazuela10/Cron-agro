@@ -6,7 +6,7 @@
   "dec": 2,
   "exchange": "CBOT",
   "contrato": "Oat Futures,Dec-2026",
-  "ultima_actualizacion": "2026-10-05T01:36:50-03:00",
+  "ultima_actualizacion": "2026-10-05T08:51:31-03:00",
   "serie": [
     {
       "close": 495.5,
@@ -7657,6 +7657,12 @@
       "close": 408.25,
       "high": 411.0,
       "low": 406.75
+    },
+    {
+      "fecha": "2026-10-05",
+      "close": 407.75,
+      "high": 408.5,
+      "low": 405.25
     }
   ]
 }
