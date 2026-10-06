@@ -1,0 +1,53 @@
+name: Importar CSV de Investing (azúcar Nº5 Londres)
+
+# Investing no permite descarga automática, así que esta serie se alimenta a mano: se sube
+# el CSV de "Datos históricos" a data/manual/<id>/ (en github.com: Add file → Upload files)
+# y este workflow lo valida y lo fusiona por fecha en data/historia/<id>.json.
+# Va separado del workflow de Yahoo: un CSV malo deja este job en rojo y no toca nada más.
+on:
+  push:
+    branches: [main]
+    paths: ["data/manual/**/*.csv"]
+  workflow_dispatch: {}
+
+concurrency:
+  group: importar-investing
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  importar:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Clonar el repositorio
+        uses: actions/checkout@v4
+
+      - name: Configurar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Validar y fusionar los CSV
+        run: python3 -u scripts/importar_investing_csv.py
+
+      - name: Commit y push si hubo cambios
+        # También si el paso anterior terminó en rojo: los archivos que sí pasaron la
+        # validación ya están fusionados; el rojo queda visible para revisar el que falló.
+        if: success() || failure()
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/historia/
+          if git diff --cached --quiet; then
+            echo "Sin cambios."
+            exit 0
+          fi
+          git commit -m "Importación de CSV de Investing ($(date -u +%Y-%m-%dT%H:%M:%SZ))"
+          # El workflow de Yahoo hace push cada 15 min; si llegó antes, se trae su commit.
+          for i in 1 2 3; do
+            git pull --rebase && git push && exit 0
+            sleep $((i * 5))
+          done
+          exit 1

@@ -9,7 +9,7 @@ Backend de datos de un dashboard interactivo de commodities y tipo de cambio. Un
 ```
 .github/workflows/actualizar-precios.yml   cron: */15 * * * 1-5 (cada 15 min, lun-vie, UTC), con bloque concurrency
 scripts/fetch_and_update.py                fetch Yahoo + parseo defensivo + cross-check + sanitize_high_low + merge_and_trim
-data/historia/<id>.json                    una variable por archivo (12 hoy) + index.json
+data/historia/<id>.json                    una variable por archivo (12 de Yahoo + ddgs_fob_gulf + azucar_londres) + index.json
 ```
 
 URL pública: `https://rmazuela10.github.io/Cron-agro/data/historia/<id>.json`
@@ -60,6 +60,14 @@ Variable semanal en `data/historia/ddgs_fob_gulf.json`, con script y workflow SE
 * Cobertura (reconstrucción del 2026-10-04): 264 semanas desde 2021-01-07. Verificadas a mano contra el PDF ~80 semanas, 0 errores. Faltan: 2021-07-22, 2021-12-30, 2022-02-10, 2022-03-03, 2022-03-24, 2022-06-23 (tabla muy chica o borrosa, sin consenso OCR) y 2022-05-26 (el post no trae PDF). USGC no publicó entre 2024-10-03 y 2025-01-09.
 * Fecha: la del título del post, controlada contra la fecha del nombre del PDF (si difieren > 3 días se descarta y se avisa). Correcciones manuales documentadas en `CORRECCIONES_DE_FECHA` de `fetch_ddgs.py` (hoy: el post titulado 29-ene-2024 es el reporte del 29-feb-2024).
 * Alternativa descartada: USDA AMS National Weekly Ethanol Report (`ams_3616.pdf`, fila New Orleans FOB OV, USD/short ton). Sirve como cross-check manual si alguna vez hace falta.
+
+## Azúcar Blanca Nº5 Londres (`azucar_londres`, fuente: Investing, carga MANUAL)
+
+* Ramon pidió (2026-10-06) el "Futuros azúcar Nº5 Londres" de Investing. Investing bloquea la descarga automática desde GitHub Actions (control anti-robots de Cloudflare, "Just a moment...") y sus términos la prohíben: NO intentar saltarse ese control ni automatizar un navegador para eso (Ramon lo preguntó y se le explicó). Yahoo no tiene este contrato (SW=F, LSU=F no existen); Stooq, Barchart y MarketWatch también bloquean.
+* Flujo: Ramon descarga el CSV de "Datos históricos" en Investing y lo sube a `data/manual/azucar_londres/` (github.com → Add file → Upload files). El workflow `importar-investing.yml` corre `scripts/importar_investing_csv.py`, que valida y fusiona por fecha en `data/historia/azucar_londres.json` (formato normal `{fecha, close, high, low}`, USD/ton métrica). No se actualiza cada 15 min: solo cuando se sube un CSV.
+* Validaciones: encabezado exacto, fechas y números legibles, rango 100-2000, sin fechas repetidas, y cross-check de la columna "% var." contra los cierres (detecta filas faltantes). Si un archivo falla, no se fusiona y el job queda en rojo. Ante fechas repetidas entre archivos gana el que llega más lejos en el tiempo.
+* Histórico inicial: CSV subido por Ramon el 2026-10-06, 1282 días desde 2021-09-07 (misma fecha de inicio que las series de Yahoo).
+* `index.json` lo reescribe el script de Yahoo con su propia lista, así que `azucar_londres` (igual que `ddgs_fob_gulf`) no aparece ahí.
 
 ## Fuera de este repo
 
