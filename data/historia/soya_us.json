@@ -6,7 +6,7 @@
   "dec": 2,
   "exchange": "CBOT",
   "contrato": "Soybean Futures,Nov-2026",
-  "ultima_actualizacion": "2026-10-08T13:51:42-03:00",
+  "ultima_actualizacion": "2026-10-08T18:51:13-03:00",
   "serie": [
     {
       "close": 1268.75,
@@ -7678,7 +7678,7 @@
     },
     {
       "fecha": "2026-10-08",
-      "close": 1289.0,
+      "close": 1286.5,
       "high": 1302.0,
       "low": 1286.5
     }
