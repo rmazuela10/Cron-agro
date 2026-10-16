@@ -6,7 +6,7 @@
   "dec": 1,
   "exchange": "CBOT",
   "contrato": "Soybean Meal Futures,Dec-2026",
-  "ultima_actualizacion": "2026-10-15T22:21:51-03:00",
+  "ultima_actualizacion": "2026-10-16T03:11:11-03:00",
   "serie": [
     {
       "close": 337.3,
@@ -7708,9 +7708,15 @@
     },
     {
       "fecha": "2026-10-15",
-      "close": 358.9,
+      "close": 359.8,
+      "high": 368.8,
+      "low": 359.3
+    },
+    {
+      "fecha": "2026-10-16",
+      "close": 356.8,
       "high": 359.8,
-      "low": 358.3
+      "low": 356.6
     }
   ]
 }
