@@ -6,7 +6,7 @@
   "dec": 2,
   "exchange": "CBOT",
   "contrato": "Soybean Oil Futures,Dec-2026",
-  "ultima_actualizacion": "2026-10-23T06:10:19-03:00",
+  "ultima_actualizacion": "2026-10-23T11:15:07-03:00",
   "serie": [
     {
       "close": 57.76,
@@ -7750,9 +7750,9 @@
     },
     {
       "fecha": "2026-10-23",
-      "close": 66.78,
-      "high": 67.24,
-      "low": 66.7
+      "close": 66.95,
+      "high": 67.29,
+      "low": 66.56
     }
   ]
 }
