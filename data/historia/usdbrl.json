@@ -7933,12 +7933,12 @@
     },
     {
       "fecha": "2026-11-03",
-      "close": 5.4825,
-      "high": 5.5143,
-      "low": 5.3837
+      "close": 5.4883,
+      "high": 5.4883,
+      "low": 5.4883
     }
   ],
-  "ultima_actualizacion": "2026-11-03T15:34:41-03:00",
+  "ultima_actualizacion": "2026-11-03T20:42:35-03:00",
   "exchange": "Interbancario / spot FX",
   "contrato": "Spot (OTC, sin vencimiento)"
 }
