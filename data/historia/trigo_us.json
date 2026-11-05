@@ -6,7 +6,7 @@
   "dec": 2,
   "exchange": "CBOT",
   "contrato": "Chicago SRW Wheat Futures,Dec-2",
-  "ultima_actualizacion": "2026-11-04T21:11:35-03:00",
+  "ultima_actualizacion": "2026-11-05T03:52:17-03:00",
   "serie": [
     {
       "close": 708.75,
@@ -7810,9 +7810,15 @@
     },
     {
       "fecha": "2026-11-04",
-      "close": 599.25,
+      "close": 598.5,
       "high": 606.25,
       "low": 591.0
+    },
+    {
+      "fecha": "2026-11-05",
+      "close": 600.75,
+      "high": 602.75,
+      "low": 598.75
     }
   ]
 }
