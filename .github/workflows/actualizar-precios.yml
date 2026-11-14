@@ -10,7 +10,10 @@ name: Actualizar precios de commodities
 # en el historial de git ni trabajo extra cuando el mercado está cerrado.
 on:
   schedule:
-    - cron: "*/15 * * * 1-5"  # cada 15 min, lun-vie
+    # Minutos no redondos (:07, :22, :37, :52): GitHub descarta muchas corridas programadas
+    # en los minutos :00/:15/:30/:45, que usa casi todo el mundo (en oct-2026 corría solo
+    # cada 4-9 horas con "*/15").
+    - cron: "7,22,37,52 * * * 1-5"  # cada 15 min, lun-vie
   workflow_dispatch: {}  # permite correrlo a mano desde la pestaña Actions, para probar
 
 # Con una corrida cada 15 minutos hay más chance de que dos ejecuciones se
