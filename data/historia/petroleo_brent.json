@@ -6,7 +6,7 @@
   "dec": 2,
   "exchange": "NY Mercantile",
   "contrato": "Brent Crude Oil Last Day Financ",
-  "ultima_actualizacion": "2026-11-18T23:21:24-03:00",
+  "ultima_actualizacion": "2026-11-19T07:38:13-03:00",
   "serie": [
     {
       "close": 71.69,
@@ -7888,7 +7888,13 @@
     },
     {
       "fecha": "2026-11-18",
-      "close": 89.59,
+      "close": 91.95,
+      "high": 93.52,
+      "low": 90.35
+    },
+    {
+      "fecha": "2026-11-19",
+      "close": 89.73,
       "high": 90.21,
       "low": 88.51
     }
