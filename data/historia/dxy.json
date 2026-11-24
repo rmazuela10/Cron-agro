@@ -7777,12 +7777,12 @@
     },
     {
       "fecha": "2026-11-23",
-      "close": 104.47,
-      "high": 104.53,
-      "low": 103.47
+      "close": 104.26,
+      "high": 104.32,
+      "low": 104.18
     }
   ],
-  "ultima_actualizacion": "2026-11-23T15:38:33-03:00",
+  "ultima_actualizacion": "2026-11-24T01:05:32-03:00",
   "exchange": "ICE (índice)",
   "contrato": "Índice spot — ICE U.S. Dollar Index"
 }
