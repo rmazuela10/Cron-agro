@@ -6,7 +6,7 @@
   "dec": 2,
   "exchange": "CBOT",
   "contrato": "Corn Futures,Dec-2026",
-  "ultima_actualizacion": "2026-11-27T08:26:41-03:00",
+  "ultima_actualizacion": "2026-11-27T17:11:42-03:00",
   "serie": [
     {
       "close": 503,
@@ -7873,6 +7873,12 @@
       "close": 439.75,
       "high": 440.75,
       "low": 431.25
+    },
+    {
+      "fecha": "2026-11-27",
+      "close": 463.0,
+      "high": 466.5,
+      "low": 458.25
     }
   ]
 }
