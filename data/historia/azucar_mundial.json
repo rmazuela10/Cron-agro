@@ -6,14 +6,8 @@
   "dec": 2,
   "exchange": "ICE Futures",
   "contrato": "Sugar #11 Oct 26",
-  "ultima_actualizacion": "2026-11-27T17:11:42-03:00",
+  "ultima_actualizacion": "2026-11-27T23:43:42-03:00",
   "serie": [
-    {
-      "close": 18.96,
-      "fecha": "2021-09-14",
-      "high": 19.18,
-      "low": 18.8
-    },
     {
       "close": 19.52,
       "fecha": "2021-09-15",
@@ -7871,7 +7865,7 @@
     {
       "fecha": "2026-11-27",
       "close": 18.77,
-      "high": 19.09,
+      "high": 19.1,
       "low": 18.68
     }
   ]
